@@ -3,7 +3,7 @@
  * Plugin Name: Horoscop Zilnic
  * Plugin URI: https://targetseo.ro/
  * Description: Publică automat horoscopul zilnic (toate cele 12 zodii), generat cu Claude prin pluginul Claude Writer. Poate prelua și rescrie complet dintr-o sursă externă sau genera de la zero.
- * Version: 1.0.0
+ * Version: 1.1.0
  * Author: Eduard / TargetSEO
  * Text Domain: horoscop-zilnic
  * Requires at least: 5.6
@@ -16,7 +16,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('HZ_VERSION', '1.0.0');
+define('HZ_VERSION', '1.1.0');
 define('HZ_PATH', plugin_dir_path(__FILE__));
 define('HZ_URL', plugin_dir_url(__FILE__));
 
@@ -40,6 +40,30 @@ function hz_init() {
 }
 add_action('plugins_loaded', 'hz_init');
 
+/**
+ * Migrare la update: seed pentru opțiunile noi pe site-urile deja instalate
+ * (activation hook-ul nu rulează la update). Pe `init`, ca să meargă și fără
+ * vizită în wp-admin.
+ */
+add_action('init', function () {
+    if (get_option('hz_db_version', '') === HZ_VERSION) {
+        return;
+    }
+
+    // v1.1.0: system prompt propriu de horoscop (înlocuiește promptul de articole
+    // din Claude Writer la generare).
+    add_option('hz_system_prompt', HZ_Horoscope::default_system_prompt(), '', 'no');
+
+    // v1.1.0: promptul zilnic implicit s-a scurtat (structura a urcat în system
+    // prompt). Îl înlocuim DOAR dacă userul nu l-a editat (conține încă textul vechi).
+    $old_prompt = get_option('hz_prompt', '');
+    if ($old_prompt !== '' && strpos($old_prompt, 'înlocuiește regulile de structură') !== false) {
+        update_option('hz_prompt', HZ_Horoscope::default_prompt(), 'no');
+    }
+
+    update_option('hz_db_version', HZ_VERSION, 'no');
+});
+
 register_activation_hook(__FILE__, function () {
     $defaults = array(
         'hz_enabled'     => 0,
@@ -49,9 +73,10 @@ register_activation_hook(__FILE__, function () {
         'hz_category'    => 'Horoscop',
         'hz_source_url'  => HZ_Horoscope::default_source_url(),
         'hz_image'       => 0,
-        'hz_title'       => HZ_Horoscope::default_title(),
-        'hz_prompt'      => HZ_Horoscope::default_prompt(),
-        'hz_auto_update' => 1,
+        'hz_title'         => HZ_Horoscope::default_title(),
+        'hz_prompt'        => HZ_Horoscope::default_prompt(),
+        'hz_system_prompt' => HZ_Horoscope::default_system_prompt(),
+        'hz_auto_update'   => 1,
     );
     foreach ($defaults as $name => $value) {
         add_option($name, $value, '', 'no');

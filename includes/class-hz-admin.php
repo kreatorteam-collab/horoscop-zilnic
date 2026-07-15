@@ -40,9 +40,10 @@ class HZ_Admin {
             'hz_category'    => 'sanitize_text_field',
             'hz_source_url'  => 'esc_url_raw',
             'hz_image'       => 'absint',
-            'hz_title'       => 'hz_sanitize_prompt',
-            'hz_prompt'      => 'hz_sanitize_prompt',
-            'hz_auto_update' => 'absint',
+            'hz_title'         => 'hz_sanitize_prompt',
+            'hz_prompt'        => 'hz_sanitize_prompt',
+            'hz_system_prompt' => 'hz_sanitize_prompt',
+            'hz_auto_update'   => 'absint',
         );
         foreach ($opts as $name => $cb) {
             register_setting('hz_settings', $name, array('sanitize_callback' => $cb));
@@ -154,10 +155,17 @@ class HZ_Admin {
                         </td>
                     </tr>
                     <tr>
-                        <th scope="row"><label for="hz_prompt"><?php esc_html_e('Prompt', 'horoscop-zilnic'); ?></label></th>
+                        <th scope="row"><label for="hz_prompt"><?php esc_html_e('Prompt zilnic', 'horoscop-zilnic'); ?></label></th>
                         <td>
-                            <textarea name="hz_prompt" id="hz_prompt" class="large-text code" rows="8"><?php echo esc_textarea(get_option('hz_prompt', HZ_Horoscope::default_prompt())); ?></textarea>
-                            <p class="description"><?php esc_html_e('Folosește {{data}} și {{zi}}. Stilul general (ton, diacritice, anti-AI) vine din system promptul Claude Writer.', 'horoscop-zilnic'); ?></p>
+                            <textarea name="hz_prompt" id="hz_prompt" class="large-text code" rows="3"><?php echo esc_textarea(get_option('hz_prompt', HZ_Horoscope::default_prompt())); ?></textarea>
+                            <p class="description"><?php esc_html_e('Instrucțiunea trimisă în fiecare zi. Folosește {{data}} și {{zi}}.', 'horoscop-zilnic'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="hz_system_prompt"><?php esc_html_e('System prompt (stilul horoscopului)', 'horoscop-zilnic'); ?></label></th>
+                        <td>
+                            <textarea name="hz_system_prompt" id="hz_system_prompt" class="large-text code" rows="14"><?php echo esc_textarea(get_option('hz_system_prompt', HZ_Horoscope::default_system_prompt())); ?></textarea>
+                            <p class="description"><?php esc_html_e('Rolul, structura fixă (12 zodii), tonul și regulile anti-AI — DOAR pentru horoscop. Înlocuiește system promptul de articole din Claude Writer la generarea horoscopului (necesită Claude Writer 1.3.3+).', 'horoscop-zilnic'); ?></p>
                         </td>
                     </tr>
                     <tr>
