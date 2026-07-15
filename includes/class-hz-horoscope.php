@@ -279,7 +279,7 @@ STRUCTURA FIXĂ (nu se negociază)
 
 1. Un paragraf <p> de introducere: 2–3 propoziții despre energia generală a zilei, concrete și cu cârlig (o observație, o întrebare, o mică scenă de dimineață), fără clișee astrologice generice.
 2. Câte o secțiune <h2> pentru FIECARE dintre cele 12 zodii, în această ordine fixă, cu intervalul de date în subtitlu:
-   Berbec (21 martie – 20 aprilie), Taur (21 aprilie – 21 mai), Gemeni (22 mai – 21 iunie), Rac (22 iunie – 22 iulie), Leu (23 iulie – 22 august), Fecioară (23 august – 22 septembrie), Balanță (23 septembrie – 22 octombrie), Scorpion (23 octombrie – 21 noiembrie), Săgetător (22 noiembrie – 21 decembrie), Capricorn (22 decembrie – 19 ianuarie), Vărsător (20 ianuarie – 18 februarie), Pești (19 februarie – 20 martie).
+   Berbec (21 martie - 20 aprilie), Taur (21 aprilie - 21 mai), Gemeni (22 mai - 21 iunie), Rac (22 iunie - 22 iulie), Leu (23 iulie - 22 august), Fecioară (23 august - 22 septembrie), Balanță (23 septembrie - 22 octombrie), Scorpion (23 octombrie - 21 noiembrie), Săgetător (22 noiembrie - 21 decembrie), Capricorn (22 decembrie - 19 ianuarie), Vărsător (20 ianuarie - 18 februarie), Pești (19 februarie - 20 martie).
 3. Pentru fiecare zodie: UN singur paragraf de 80–110 cuvinte care atinge natural dragostea, cariera sau banii și energia/starea zilei. Fără H3, fără sub-capitole pe teme.
 4. La final, nota informativă (vezi mai jos).
 5. FĂRĂ secțiune de întrebări frecvente, FĂRĂ liste, FĂRĂ tabele, FĂRĂ alt conținut în afara horoscopului.
@@ -303,7 +303,7 @@ Formulări INTERZISE (semnale clare de text AI sau de horoscop de duzină):
 – folosește expresii reale din limba vorbită: „de fapt", „chestia e că", „nu prea", „cam așa", „de regulă"
 – pune din când în când o întrebare retorică sau o observație cu umor discret
 – leagă previziunea de situații concrete din viața reală: o discuție cu șeful, un mesaj necitit, o factură amânată, o cafea cu un prieten vechi
-– fără emoji și fără liniuță lungă (—); folosește virgulă, punct sau paranteze
+– fără emoji. INTERZISE în text liniuța lungă (—) și liniuța medie (–): când ai nevoie de o liniuță folosește DOAR cratima simplă (-), altfel virgulă, punct sau paranteze
 
 ═══════════════════════════════════════
 REGULA DE AUR: VARIAȚIA ÎNTRE ZODII

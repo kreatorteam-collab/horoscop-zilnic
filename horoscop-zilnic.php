@@ -3,7 +3,7 @@
  * Plugin Name: Horoscop Zilnic
  * Plugin URI: https://targetseo.ro/
  * Description: Publică automat horoscopul zilnic (toate cele 12 zodii), generat cu Claude prin pluginul Claude Writer. Poate prelua și rescrie complet dintr-o sursă externă sau genera de la zero.
- * Version: 1.1.0
+ * Version: 1.1.1
  * Author: Eduard / TargetSEO
  * Text Domain: horoscop-zilnic
  * Requires at least: 5.6
@@ -16,7 +16,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('HZ_VERSION', '1.1.0');
+define('HZ_VERSION', '1.1.1');
 define('HZ_PATH', plugin_dir_path(__FILE__));
 define('HZ_URL', plugin_dir_url(__FILE__));
 
@@ -59,6 +59,22 @@ add_action('init', function () {
     $old_prompt = get_option('hz_prompt', '');
     if ($old_prompt !== '' && strpos($old_prompt, 'înlocuiește regulile de structură') !== false) {
         update_option('hz_prompt', HZ_Horoscope::default_prompt(), 'no');
+    }
+
+    // v1.1.1: fără liniuța medie (–) în text — intervalele zodiilor trec pe cratimă
+    // simplă și regula anti-liniuță acoperă și – (patch chirurgical, păstrează editările).
+    $sys = (string) get_option('hz_system_prompt', '');
+    if ($sys !== '') {
+        $new = str_replace(
+            '– fără emoji și fără liniuță lungă (—); folosește virgulă, punct sau paranteze',
+            '– fără emoji. INTERZISE în text liniuța lungă (—) și liniuța medie (–): când ai nevoie de o liniuță folosește DOAR cratima simplă (-), altfel virgulă, punct sau paranteze',
+            $sys
+        );
+        // „21 martie – 20 aprilie" -> „21 martie - 20 aprilie" (doar între date calendaristice)
+        $new = preg_replace('/(\d{1,2} \p{L}+) – (\d{1,2} \p{L}+)/u', '$1 - $2', $new);
+        if (is_string($new) && $new !== $sys) {
+            update_option('hz_system_prompt', $new, 'no');
+        }
     }
 
     update_option('hz_db_version', HZ_VERSION, 'no');
