@@ -38,6 +38,7 @@ class HZ_Admin {
             'hz_status'      => 'sanitize_text_field',
             'hz_model'       => 'sanitize_text_field',
             'hz_category'    => 'sanitize_text_field',
+            'hz_category_id' => 'absint',
             'hz_source_url'  => 'esc_url_raw',
             'hz_image'       => 'absint',
             'hz_title'         => 'hz_sanitize_prompt',
@@ -125,10 +126,20 @@ class HZ_Admin {
                         </td>
                     </tr>
                     <tr>
-                        <th scope="row"><label for="hz_category"><?php esc_html_e('Categoria', 'horoscop-zilnic'); ?></label></th>
+                        <th scope="row"><label for="hz_category_id"><?php esc_html_e('Categoria', 'horoscop-zilnic'); ?></label></th>
                         <td>
-                            <input type="text" name="hz_category" id="hz_category" class="regular-text" value="<?php echo esc_attr(get_option('hz_category', 'Horoscop')); ?>" />
-                            <p class="description"><?php esc_html_e('Se creează automat dacă nu există.', 'horoscop-zilnic'); ?></p>
+                            <?php
+                            wp_dropdown_categories(array(
+                                'name'              => 'hz_category_id',
+                                'id'                => 'hz_category_id',
+                                'selected'          => (int) get_option('hz_category_id', 0),
+                                'hide_empty'        => false,
+                                'hierarchical'      => true,
+                                'show_option_none'  => __('— Horoscop (se creează automat) —', 'horoscop-zilnic'),
+                                'option_none_value' => 0,
+                            ));
+                            ?>
+                            <p class="description"><?php esc_html_e('Alege categoria existentă în care se publică articolele. Dacă nu alegi nimic, se folosește (și se creează la nevoie) categoria „Horoscop".', 'horoscop-zilnic'); ?></p>
                         </td>
                     </tr>
                     <tr>

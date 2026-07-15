@@ -249,6 +249,15 @@ class HZ_Horoscope {
     }
 
     private function category_id() {
+        // Categoria aleasă explicit de user din dropdown are prioritate.
+        $chosen = (int) get_option('hz_category_id', 0);
+        if ($chosen > 0) {
+            $term = get_term($chosen, 'category');
+            if ($term instanceof WP_Term) {
+                return (int) $term->term_id;
+            }
+        }
+        // Rezervă (nimic ales / categoria ștearsă): categoria „Horoscop", creată la nevoie.
         $name = trim((string) get_option('hz_category', ''));
         if ($name === '') { $name = 'Horoscop'; }
         $term = get_term_by('name', $name, 'category');

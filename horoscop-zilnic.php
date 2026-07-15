@@ -3,7 +3,7 @@
  * Plugin Name: Horoscop Zilnic
  * Plugin URI: https://targetseo.ro/
  * Description: Publică automat horoscopul zilnic (toate cele 12 zodii), generat cu Claude prin pluginul Claude Writer. Poate prelua și rescrie complet dintr-o sursă externă sau genera de la zero.
- * Version: 1.1.2
+ * Version: 1.1.3
  * Author: Eduard / TargetSEO
  * Text Domain: horoscop-zilnic
  * Requires at least: 5.6
@@ -16,7 +16,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('HZ_VERSION', '1.1.2');
+define('HZ_VERSION', '1.1.3');
 define('HZ_PATH', plugin_dir_path(__FILE__));
 define('HZ_URL', plugin_dir_url(__FILE__));
 
@@ -77,6 +77,18 @@ add_action('init', function () {
         }
     }
 
+    // v1.1.3: categoria devine alegere din dropdown (ID). Dacă site-ul folosea deja o
+    // categorie după nume, o preselectăm ca userul să nu reconfigureze nimic.
+    if (false === get_option('hz_category_id', false)) {
+        $seed = 0;
+        $name = trim((string) get_option('hz_category', ''));
+        if ($name !== '') {
+            $term = get_term_by('name', $name, 'category');
+            if ($term instanceof WP_Term) { $seed = (int) $term->term_id; }
+        }
+        add_option('hz_category_id', $seed, '', 'no');
+    }
+
     update_option('hz_db_version', HZ_VERSION, 'no');
 });
 
@@ -87,6 +99,7 @@ register_activation_hook(__FILE__, function () {
         'hz_status'      => 'publish',
         'hz_model'       => '',
         'hz_category'    => 'Horoscop',
+        'hz_category_id' => 0,
         'hz_source_url'  => HZ_Horoscope::default_source_url(),
         'hz_image'       => 0,
         'hz_title'         => HZ_Horoscope::default_title(),
