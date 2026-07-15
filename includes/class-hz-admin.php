@@ -10,6 +10,7 @@ class HZ_Admin {
         add_action('admin_menu', array($this, 'menu'));
         add_action('admin_init', array($this, 'register_settings'));
         add_action('admin_enqueue_scripts', array($this, 'enqueue'));
+        add_action('wp_ajax_hz_import_image', array($this, 'ajax_import_image'));
     }
 
     public function menu() {
@@ -24,6 +25,7 @@ class HZ_Admin {
 
     public function enqueue($hook) {
         if ($hook !== 'settings_page_horoscop-zilnic') { return; }
+        wp_enqueue_media(); // modalul standard WP: galerie + upload
         wp_enqueue_script('hz-admin', HZ_URL . 'assets/js/admin.js', array('jquery'), HZ_VERSION, true);
         wp_localize_script('hz-admin', 'HZAdmin', array(
             'ajaxUrl' => admin_url('admin-ajax.php'),
@@ -49,6 +51,31 @@ class HZ_Admin {
         foreach ($opts as $name => $cb) {
             register_setting('hz_settings', $name, array('sanitize_callback' => $cb));
         }
+    }
+
+    /** Importă o imagine dintr-un URL extern în Media și returnează attachment ID + preview. */
+    public function ajax_import_image() {
+        check_ajax_referer('hz_admin_nonce', 'nonce');
+        if (!current_user_can('upload_files')) {
+            wp_send_json_error(array('message' => __('Permisiune refuzată.', 'horoscop-zilnic')));
+        }
+        $url = isset($_POST['url']) ? esc_url_raw(wp_unslash($_POST['url'])) : '';
+        if ($url === '' || !preg_match('#^https?://#i', $url)) {
+            wp_send_json_error(array('message' => __('URL invalid.', 'horoscop-zilnic')));
+        }
+
+        require_once ABSPATH . 'wp-admin/includes/media.php';
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+        require_once ABSPATH . 'wp-admin/includes/image.php';
+
+        $id = media_sideload_image($url, 0, __('Imagine horoscop', 'horoscop-zilnic'), 'id');
+        if (is_wp_error($id)) {
+            wp_send_json_error(array('message' => $id->get_error_message()));
+        }
+        wp_send_json_success(array(
+            'id'   => (int) $id,
+            'html' => wp_get_attachment_image((int) $id, array(150, 150)),
+        ));
     }
 
     public function render_page() {
@@ -150,12 +177,20 @@ class HZ_Admin {
                         </td>
                     </tr>
                     <tr>
-                        <th scope="row"><label for="hz_image"><?php esc_html_e('Imagine reprezentativă', 'horoscop-zilnic'); ?></label></th>
+                        <th scope="row"><?php esc_html_e('Imagine reprezentativă (cover)', 'horoscop-zilnic'); ?></th>
                         <td>
                             <?php $himg = (int) get_option('hz_image', 0); ?>
-                            <input type="number" name="hz_image" id="hz_image" min="0" step="1" value="<?php echo esc_attr($himg); ?>" style="width:120px;" />
-                            <p class="description"><?php esc_html_e('ID-ul unei imagini din Media (deschide imaginea în Media și ia numărul din URL, „item=..."). Se refolosește la fiecare articol. 0 = fără imagine.', 'horoscop-zilnic'); ?></p>
-                            <?php if ($himg > 0) : $thumb = wp_get_attachment_image($himg, array(120, 120)); echo $thumb ? $thumb : '<span style="color:#b32d2e;">' . esc_html__('ID-ul nu este o imagine validă.', 'horoscop-zilnic') . '</span>'; endif; ?>
+                            <input type="hidden" name="hz_image" id="hz_image" value="<?php echo esc_attr($himg); ?>" />
+                            <div id="hz-image-preview" style="margin-bottom:8px;">
+                                <?php if ($himg > 0) { echo wp_get_attachment_image($himg, array(150, 150)); } ?>
+                            </div>
+                            <button type="button" class="button" id="hz-image-pick"><?php esc_html_e('Alege din galerie / Încarcă', 'horoscop-zilnic'); ?></button>
+                            <button type="button" class="button" id="hz-image-remove" <?php disabled($himg <= 0); ?>><?php esc_html_e('Elimină imaginea', 'horoscop-zilnic'); ?></button>
+                            <p class="description" style="margin-top:10px;"><?php esc_html_e('sau importă dintr-un URL extern (imaginea se descarcă în Media):', 'horoscop-zilnic'); ?></p>
+                            <input type="url" id="hz-image-url" class="regular-text" placeholder="https://exemplu.ro/imagine.jpg" />
+                            <button type="button" class="button" id="hz-image-import"><?php esc_html_e('Importă în Media', 'horoscop-zilnic'); ?></button>
+                            <span id="hz-image-import-status"></span>
+                            <p class="description"><?php esc_html_e('Imaginea aleasă se pune ca imagine reprezentativă la fiecare articol de horoscop. După alegere apasă „Salvează setările".', 'horoscop-zilnic'); ?></p>
                         </td>
                     </tr>
                     <tr>
