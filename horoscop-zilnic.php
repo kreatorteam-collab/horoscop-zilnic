@@ -3,7 +3,7 @@
  * Plugin Name: Horoscop Zilnic
  * Plugin URI: https://targetseo.ro/
  * Description: Publică automat horoscopul zilnic (toate cele 12 zodii), generat cu Claude prin pluginul Claude Writer. Poate prelua și rescrie complet dintr-o sursă externă sau genera de la zero.
- * Version: 1.1.1
+ * Version: 1.1.2
  * Author: Eduard / TargetSEO
  * Text Domain: horoscop-zilnic
  * Requires at least: 5.6
@@ -16,7 +16,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('HZ_VERSION', '1.1.1');
+define('HZ_VERSION', '1.1.2');
 define('HZ_PATH', plugin_dir_path(__FILE__));
 define('HZ_URL', plugin_dir_url(__FILE__));
 

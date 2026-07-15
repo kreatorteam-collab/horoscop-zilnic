@@ -122,7 +122,9 @@ class HZ_Horoscope {
             if ($source !== '') {
                 $prompt .= "\n\nFolosește DOAR ca sursă de inspirație pentru previziuni horoscopul de mai jos. "
                     . "RESCRIE totul complet, în cuvintele tale, cu structura cerută mai sus. "
-                    . "NU copia formulări, propoziții sau titluri din sursă.\n\nSURSĂ:\n" . $source;
+                    . "NU copia formulări, propoziții sau titluri din sursă. "
+                    . "OBLIGATORIU: nu menționa NICIODATĂ sursa, niciun nume de site, publicație, brand, autor sau URL - "
+                    . "articolul trebuie să pară scris integral și original de redacția noastră, fără nicio trimitere la altă publicație.\n\nSURSĂ:\n" . $source;
             }
         }
 
@@ -148,6 +150,10 @@ class HZ_Horoscope {
         }
 
         $content = $this->clean_html($result['text']);
+        if ($source_url !== '') {
+            // Plasă de siguranță: nicio mențiune a sursei nu are voie să ajungă în articol.
+            $content = $this->scrub_source_mentions($content, $source_url);
+        }
         if (strlen($content) < 500 || stripos($content, '<h2') === false) {
             return new WP_Error('hz_short', 'Conținut generat invalid sau prea scurt (' . strlen($content) . ' caractere).');
         }
@@ -211,7 +217,30 @@ class HZ_Horoscope {
         // Eliminăm script/style înainte de strip, altfel rămâne cod în text.
         $html = preg_replace('/<(script|style|noscript)[^>]*>.*?<\/\1>/is', ' ', $html);
         $text = trim(preg_replace('/\s+/u', ' ', wp_strip_all_tags($html)));
+        // Scoatem numele/domeniul sursei din text ÎNAINTE să ajungă la model:
+        // ce nu vede, nu poate menționa.
+        $text = $this->scrub_source_mentions($text, $url);
         return mb_substr($text, 0, 12000);
+    }
+
+    /** Tokenii de brand ai sursei: „astrocafe.ro" și „astrocafe" (derivați din URL, generic). */
+    private function source_brand_tokens($url) {
+        $host = strtolower((string) wp_parse_url($url, PHP_URL_HOST));
+        $host = preg_replace('/^www\./', '', $host);
+        if ($host === '' || $host === null) { return array(); }
+        $tokens = array($host);
+        $brand  = preg_replace('/\..*$/', '', $host);
+        if ($brand !== '' && $brand !== $host) { $tokens[] = $brand; }
+        return $tokens;
+    }
+
+    /** Elimină orice mențiune a sursei (domeniu sau nume de brand), indiferent de capitalizare. */
+    private function scrub_source_mentions($text, $url) {
+        foreach ($this->source_brand_tokens($url) as $token) {
+            $text = str_ireplace($token, '', $text);
+        }
+        // Curățăm spațiile duble rămase după eliminare.
+        return preg_replace('/ {2,}/', ' ', $text);
     }
 
     private function author_id() {
