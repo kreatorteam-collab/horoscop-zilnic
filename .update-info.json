@@ -1,0 +1,12 @@
+{
+  "name": "Horoscop Zilnic",
+  "slug": "horoscop-zilnic",
+  "version": "1.0.0",
+  "tested": "6.7",
+  "requires": "5.6",
+  "requires_php": "7.4",
+  "package": "https://github.com/kreatorteam-collab/horoscop-zilnic/archive/refs/heads/main.zip",
+  "url": "https://github.com/kreatorteam-collab/horoscop-zilnic",
+  "changelog_url": "https://github.com/kreatorteam-collab/horoscop-zilnic/commits/main",
+  "description": "Publică automat horoscopul zilnic (toate cele 12 zodii), generat cu Claude prin pluginul Claude Writer. Poate prelua și rescrie complet dintr-o sursă externă sau genera de la zero."
+}
