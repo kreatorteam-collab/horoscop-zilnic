@@ -167,6 +167,7 @@ class CW_Rest {
 
                         case 'error':
                             $msg = isset($json['error']['message']) ? $json['error']['message'] : 'eroare API';
+                            CW_API::maybe_credit_alert('anthropic', $msg);
                             echo "event: error\n";
                             echo 'data: ' . wp_json_encode(array('message' => $msg)) . "\n\n";
                             @flush();
@@ -266,6 +267,7 @@ class CW_Rest {
                     // Erorile OpenAI vin ca obiect {"error":{...}} chiar și pe stream.
                     if (isset($json['error'])) {
                         $msg = isset($json['error']['message']) ? $json['error']['message'] : 'eroare API';
+                        CW_API::maybe_credit_alert('openai', $msg);
                         echo "event: error\n";
                         echo 'data: ' . wp_json_encode(array('message' => $msg)) . "\n\n";
                         @flush();

@@ -12,6 +12,7 @@ class CW_Admin {
         add_action('admin_enqueue_scripts', array($this, 'enqueue'));
         add_action('wp_ajax_cw_test_key', array($this, 'ajax_test_key'));
         add_action('wp_ajax_cw_test_openai_key', array($this, 'ajax_test_openai_key'));
+        add_action('admin_notices', array($this, 'credit_notices'));
 
         // La salvare: dacă e gol (câmp mascat) păstrăm cheia veche; altfel criptăm noua cheie.
         $encrypt_on_save = function ($value, $old) {
@@ -44,6 +45,21 @@ class CW_Admin {
             'ajaxUrl' => admin_url('admin-ajax.php'),
             'nonce'   => wp_create_nonce('cw_admin_nonce'),
         ));
+    }
+
+    /** Banner roșu în tot wp-admin cât timp un provider e rămas fără credit. */
+    public function credit_notices() {
+        if (!current_user_can('manage_options')) { return; }
+        $labels = array('openai' => 'OpenAI (GPT)', 'anthropic' => 'Anthropic (Claude)');
+        foreach ($labels as $provider => $label) {
+            $err = get_option('cw_credit_error_' . $provider);
+            if (!is_array($err) || empty($err['time'])) { continue; }
+            echo '<div class="notice notice-error"><p><strong>AI Writer:</strong> ' . esc_html(sprintf(
+                /* translators: %s: numele providerului */
+                __('Creditele API %s s-au terminat — generarea (articole + horoscop zilnic) eșuează. Alimentează contul; alerta dispare singură la prima generare reușită.', 'claude-writer'),
+                $label
+            )) . '</p></div>';
+        }
     }
 
     public function register_settings() {

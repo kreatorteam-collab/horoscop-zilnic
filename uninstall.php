@@ -11,6 +11,8 @@ $options = array(
     'cw_monthly_cost_limit', 'cw_system_prompt', 'cw_article_prompt', 'cw_rewrite_prompt',
     'cw_title_prompt', 'cw_keywords_prompt', 'cw_disclaimer', 'cw_auto_update', 'cw_db_version',
     'cw_calls_total', 'cw_cost_total', 'cw_cost_monthly', 'cw_usage_by_model',
+    'cw_credit_error_openai', 'cw_credit_error_anthropic',
+    'cw_credit_mail_openai', 'cw_credit_mail_anthropic',
 );
 foreach ($options as $opt) { delete_option($opt); }
 delete_transient('cw_update_info');

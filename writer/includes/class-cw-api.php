@@ -185,6 +185,48 @@ class CW_API {
         );
     }
 
+    /* ---- Alertă „credite epuizate" ---- */
+
+    /**
+     * Detectează erorile de tip „nu mai ai credit" (OpenAI: insufficient_quota;
+     * Anthropic: credit balance is too low) și anunță adminul: e-mail (max unul
+     * la 3 zile per provider, altfel cronul zilnic ar spama) + banner în wp-admin
+     * (afișat de CW_Admin cât timp există opțiunea de eroare).
+     */
+    public static function maybe_credit_alert($provider, $message) {
+        $m = strtolower((string) $message);
+        $is_credit = $provider === 'openai'
+            ? (strpos($m, 'insufficient_quota') !== false || strpos($m, 'exceeded your current quota') !== false)
+            : (strpos($m, 'credit balance') !== false);
+        if (!$is_credit) { return; }
+
+        update_option('cw_credit_error_' . $provider, array('time' => time(), 'message' => (string) $message), 'no');
+
+        $last = (int) get_option('cw_credit_mail_' . $provider, 0);
+        if (time() - $last < 3 * DAY_IN_SECONDS) { return; }
+        update_option('cw_credit_mail_' . $provider, time(), 'no');
+
+        $label   = $provider === 'openai' ? 'OpenAI (GPT)' : 'Anthropic (Claude)';
+        $host    = wp_parse_url(home_url(), PHP_URL_HOST);
+        $subject = sprintf('[%s] Creditele API %s s-au terminat', $host, $label);
+        $body    = sprintf(
+            "Generarea AI a eșuat pe %s pentru că a rămas fără credit cheia API %s.\n\n"
+            . "Eroarea primită de la API:\n%s\n\n"
+            . "Ce e de făcut: alimentează contul %s. După alimentare, generarea (articole + horoscop zilnic) își revine singură, nu trebuie schimbat nimic în WordPress.\n\n"
+            . "Notă: e-mailul acesta se trimite cel mult o dată la 3 zile per site; până la alimentare vezi și un banner roșu în wp-admin.",
+            home_url(), $label, $message, $label
+        );
+        wp_mail(get_option('admin_email'), $subject, $body);
+    }
+
+    /** La prima generare reușită, alerta se stinge singură. */
+    public static function clear_credit_alert($provider) {
+        if (get_option('cw_credit_error_' . $provider)) {
+            delete_option('cw_credit_error_' . $provider);
+            delete_option('cw_credit_mail_' . $provider);
+        }
+    }
+
     /* ---- Generare non-streaming ---- */
 
     /**
@@ -207,9 +249,14 @@ class CW_API {
             ));
         }
 
-        return $provider === 'openai'
+        $result = $provider === 'openai'
             ? self::generate_openai($model_id, $user_prompt, $max_tokens)
             : self::generate_anthropic($model_id, $user_prompt, $max_tokens);
+
+        if (!is_wp_error($result)) {
+            self::clear_credit_alert($provider); // generare reușită -> alerta se stinge
+        }
+        return $result;
     }
 
     private static function generate_anthropic($model_id, $user_prompt, $max_tokens = null) {
@@ -243,6 +290,7 @@ class CW_API {
                 $msg = is_array($body) && isset($body['error']['message'])
                     ? $body['error']['message']
                     : __('Răspuns invalid de la API.', 'claude-writer');
+                self::maybe_credit_alert('anthropic', $msg);
                 return new WP_Error('cw_api', sprintf(__('Eroare API (%d): %s', 'claude-writer'), $code, $msg));
             }
 
@@ -316,6 +364,7 @@ class CW_API {
                 $msg = is_array($body) && isset($body['error']['message'])
                     ? $body['error']['message']
                     : __('Răspuns invalid de la API.', 'claude-writer');
+                self::maybe_credit_alert('openai', $msg);
                 return new WP_Error('cw_api', sprintf(__('Eroare API (%d): %s', 'claude-writer'), $code, $msg));
             }
 
