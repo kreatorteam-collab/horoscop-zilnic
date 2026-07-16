@@ -1,14 +1,13 @@
 <?php
 /**
- * Plugin Name: Horoscop Zilnic
+ * Plugin Name: AI Writer & Horoscop Zilnic
  * Plugin URI: https://targetseo.ro/
- * Description: Publică automat horoscopul zilnic (toate cele 12 zodii), generat cu Claude prin pluginul Claude Writer. Poate prelua și rescrie complet dintr-o sursă externă sau genera de la zero.
- * Version: 1.1.4
+ * Description: Generează și rescrie articole SEO direct în editor (GPT-5.6 și Claude) și publică automat horoscopul zilnic cu toate cele 12 zodii. Un singur plugin: chei API, costuri, editor și horoscop.
+ * Version: 2.0.0
  * Author: Eduard / TargetSEO
  * Text Domain: horoscop-zilnic
  * Requires at least: 5.6
  * Requires PHP: 7.4
- * Requires Plugins: claude-writer
  * License: GPL v2 or later
  */
 
@@ -16,9 +15,16 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('HZ_VERSION', '1.1.4');
+define('HZ_VERSION', '2.0.0');
 define('HZ_PATH', plugin_dir_path(__FILE__));
 define('HZ_URL', plugin_dir_url(__FILE__));
+
+// Motorul AI Writer e INCLUS (v2.0.0). Dacă vechiul plugin separat „claude-writer"
+// mai e activ pe site, clasele lui (identice) au prioritate în acest request —
+// îl dezactivăm și îl ștergem mai jos, iar din requestul următor rulează copia inclusă.
+if (!class_exists('CW_API')) {
+    require_once HZ_PATH . 'writer/writer.php';
+}
 
 require_once HZ_PATH . 'includes/class-hz-horoscope.php';
 require_once HZ_PATH . 'includes/class-hz-admin.php';
@@ -28,17 +34,38 @@ function hz_init() {
     (new HZ_Admin())->init();
     (new HZ_Horoscope())->init();
     (new HZ_Updater())->init();
-
-    // Generarea se face prin Claude Writer (cheie API, modele, cost tracking).
-    if (!class_exists('CW_API')) {
-        add_action('admin_notices', function () {
-            echo '<div class="notice notice-error"><p><strong>Horoscop Zilnic:</strong> '
-                . esc_html__('necesită pluginul Claude Writer instalat și activ (folosește cheia API și modelele de acolo).', 'horoscop-zilnic')
-                . '</p></div>';
-        });
-    }
 }
 add_action('plugins_loaded', 'hz_init');
+
+/**
+ * v2.0.0: AI Writer e inclus aici — eliminăm pluginul vechi „claude-writer" de pe site.
+ * Ștergere DIRECTĂ a folderului, FĂRĂ uninstall.php (uninstall-ul lui ar șterge
+ * opțiunile cw_* — adică exact cheile API și setările pe care le folosim acum).
+ */
+add_action('init', function () {
+    if (get_option('hz_cw_removed')) { return; }
+    $old_plugin = 'claude-writer/claude-writer.php';
+    if (file_exists(WP_PLUGIN_DIR . '/' . $old_plugin)) {
+        if (!function_exists('deactivate_plugins')) {
+            require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        }
+        deactivate_plugins($old_plugin, true); // silent: fără hook-uri de deactivare
+        hz_delete_dir(WP_PLUGIN_DIR . '/claude-writer');
+    }
+    update_option('hz_cw_removed', 1); // autoload yes: verificarea să nu coste un query
+}, 99);
+
+function hz_delete_dir($dir) {
+    if (!is_dir($dir)) { return; }
+    $items = scandir($dir);
+    if ($items === false) { return; }
+    foreach ($items as $item) {
+        if ($item === '.' || $item === '..') { continue; }
+        $path = $dir . '/' . $item;
+        if (is_dir($path)) { hz_delete_dir($path); } else { @unlink($path); }
+    }
+    @rmdir($dir);
+}
 
 /**
  * Migrare la update: seed pentru opțiunile noi pe site-urile deja instalate

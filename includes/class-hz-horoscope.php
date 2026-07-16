@@ -71,10 +71,10 @@ class HZ_Horoscope {
             return new WP_Error('hz_off', 'Horoscopul zilnic este dezactivat.');
         }
         if (!class_exists('CW_API')) {
-            return $this->fail('Pluginul Claude Writer nu este activ.');
+            return $this->fail('Motorul AI Writer nu este încărcat.');
         }
         if (!CW_API::has_key()) {
-            return $this->fail('Cheia API Anthropic nu este configurată în Claude Writer.');
+            return $this->fail('Nicio cheie API configurată în Setări → AI Writer.');
         }
 
         $today = current_time('Y-m-d');

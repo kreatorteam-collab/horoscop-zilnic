@@ -81,9 +81,8 @@ class HZ_Admin {
     public function render_page() {
         if (!current_user_can('manage_options')) { return; }
 
-        $cw_active = class_exists('CW_API');
-        $has_key   = $cw_active && CW_API::has_key();
-        $models    = $cw_active ? CW_Models::all() : array();
+        $has_key = CW_API::has_key();
+        $models  = CW_Models::all();
 
         $on    = (int) get_option('hz_enabled', 0);
         $next  = wp_next_scheduled(HZ_Horoscope::HOOK);
@@ -93,10 +92,8 @@ class HZ_Admin {
         <div class="wrap">
             <h1><?php esc_html_e('Horoscop Zilnic', 'horoscop-zilnic'); ?></h1>
 
-            <?php if (!$cw_active) : ?>
-                <div class="notice notice-error"><p><?php esc_html_e('Pluginul Claude Writer trebuie să fie instalat și activ — Horoscop Zilnic generează prin el (cheie API, modele, costuri).', 'horoscop-zilnic'); ?></p></div>
-            <?php elseif (!$has_key) : ?>
-                <div class="notice notice-warning"><p><?php esc_html_e('Configurează întâi cheia API Anthropic în Setări → Claude Writer.', 'horoscop-zilnic'); ?></p></div>
+            <?php if (!$has_key) : ?>
+                <div class="notice notice-warning"><p><?php esc_html_e('Configurează întâi cheia API (OpenAI sau Anthropic) în Setări → AI Writer.', 'horoscop-zilnic'); ?></p></div>
             <?php endif; ?>
 
             <p style="max-width:640px;">
@@ -144,7 +141,7 @@ class HZ_Admin {
                         <td>
                             <?php $hm = get_option('hz_model', ''); ?>
                             <select name="hz_model" id="hz_model">
-                                <option value="" <?php selected($hm, ''); ?>><?php esc_html_e('Modelul implicit din Claude Writer', 'horoscop-zilnic'); ?></option>
+                                <option value="" <?php selected($hm, ''); ?>><?php esc_html_e('Modelul implicit din AI Writer', 'horoscop-zilnic'); ?></option>
                                 <?php foreach ($models as $id => $m) : ?>
                                     <option value="<?php echo esc_attr($id); ?>" <?php selected($id, $hm); ?>><?php echo esc_html($m['label']); ?></option>
                                 <?php endforeach; ?>
@@ -211,7 +208,7 @@ class HZ_Admin {
                         <th scope="row"><label for="hz_system_prompt"><?php esc_html_e('System prompt (stilul horoscopului)', 'horoscop-zilnic'); ?></label></th>
                         <td>
                             <textarea name="hz_system_prompt" id="hz_system_prompt" class="large-text code" rows="14"><?php echo esc_textarea(get_option('hz_system_prompt', HZ_Horoscope::default_system_prompt())); ?></textarea>
-                            <p class="description"><?php esc_html_e('Rolul, structura fixă (12 zodii), tonul și regulile anti-AI — DOAR pentru horoscop. Înlocuiește system promptul de articole din Claude Writer la generarea horoscopului (necesită Claude Writer 1.3.3+).', 'horoscop-zilnic'); ?></p>
+                            <p class="description"><?php esc_html_e('Rolul, structura fixă (12 zodii), tonul și regulile anti-AI — DOAR pentru horoscop. La generarea horoscopului înlocuiește system promptul de articole din AI Writer.', 'horoscop-zilnic'); ?></p>
                         </td>
                     </tr>
                     <tr>
