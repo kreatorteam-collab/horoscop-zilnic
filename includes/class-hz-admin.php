@@ -7,24 +7,24 @@ if (!defined('ABSPATH')) { exit; }
 class HZ_Admin {
 
     public function init() {
-        add_action('admin_menu', array($this, 'menu'));
+        // Setările horoscopului sunt un TAB în pagina unică „AI Writer & Horoscop"
+        // (Setări → AI Writer & Horoscop → tab Horoscop Zilnic) — fără meniu propriu.
         add_action('admin_init', array($this, 'register_settings'));
+        add_action('admin_init', array($this, 'redirect_legacy_page'));
         add_action('admin_enqueue_scripts', array($this, 'enqueue'));
         add_action('wp_ajax_hz_import_image', array($this, 'ajax_import_image'));
     }
 
-    public function menu() {
-        add_options_page(
-            __('Horoscop Zilnic', 'horoscop-zilnic'),
-            __('Horoscop Zilnic', 'horoscop-zilnic'),
-            'manage_options',
-            'horoscop-zilnic',
-            array($this, 'render_page')
-        );
+    /** Vechiul link Setări → Horoscop Zilnic redirecționează la tab-ul din pagina unică. */
+    public function redirect_legacy_page() {
+        if (isset($_GET['page']) && $_GET['page'] === 'horoscop-zilnic') {
+            wp_safe_redirect(admin_url('options-general.php?page=claude-writer&tab=horoscop'));
+            exit;
+        }
     }
 
     public function enqueue($hook) {
-        if ($hook !== 'settings_page_horoscop-zilnic') { return; }
+        if ($hook !== 'settings_page_claude-writer') { return; }
         wp_enqueue_media(); // modalul standard WP: galerie + upload
         wp_enqueue_script('hz-admin', HZ_URL . 'assets/js/admin.js', array('jquery'), HZ_VERSION, true);
         wp_localize_script('hz-admin', 'HZAdmin', array(
@@ -78,7 +78,8 @@ class HZ_Admin {
         ));
     }
 
-    public function render_page() {
+    /** Conținutul tab-ului „Horoscop Zilnic" din pagina unică de setări. */
+    public function render_tab() {
         if (!current_user_can('manage_options')) { return; }
 
         $has_key = CW_API::has_key();
@@ -89,9 +90,6 @@ class HZ_Admin {
         $last  = (string) get_option('hz_last_run', '');
         $err   = (string) get_option('hz_last_error', '');
         ?>
-        <div class="wrap">
-            <h1><?php esc_html_e('Horoscop Zilnic', 'horoscop-zilnic'); ?></h1>
-
             <?php if (!$has_key) : ?>
                 <div class="notice notice-warning"><p><?php esc_html_e('Configurează întâi cheia API (OpenAI sau Anthropic) în Setări → AI Writer.', 'horoscop-zilnic'); ?></p></div>
             <?php endif; ?>
@@ -228,7 +226,6 @@ class HZ_Admin {
                 <span id="hz-test-result"></span>
             </p>
             <p class="description" style="max-width:640px;"><?php esc_html_e('Creează acum o ciornă de probă cu setările SALVATE (salvează întâi modificările; durează 1–2 minute). Nu afectează rularea zilnică și nu publică nimic.', 'horoscop-zilnic'); ?></p>
-        </div>
         <?php
     }
 }

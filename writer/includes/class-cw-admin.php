@@ -26,9 +26,10 @@ class CW_Admin {
     }
 
     public function menu() {
+        // Pagina UNICĂ de setări a pluginului: tab „AI Writer" + tab „Horoscop Zilnic".
         add_options_page(
-            __('AI Writer', 'claude-writer'),
-            __('AI Writer', 'claude-writer'),
+            __('AI Writer & Horoscop', 'claude-writer'),
+            __('AI Writer & Horoscop', 'claude-writer'),
             'manage_options',
             'claude-writer',
             array($this, 'render_page')
@@ -69,6 +70,27 @@ class CW_Admin {
 
     public function render_page() {
         if (!current_user_can('manage_options')) { return; }
+
+        $tab      = (isset($_GET['tab']) && $_GET['tab'] === 'horoscop') ? 'horoscop' : 'writer';
+        $base_url = admin_url('options-general.php?page=claude-writer');
+        ?>
+        <div class="wrap cw-wrap">
+            <h1><?php esc_html_e('AI Writer & Horoscop Zilnic', 'claude-writer'); ?></h1>
+
+            <h2 class="nav-tab-wrapper" style="margin-bottom:16px;">
+                <a href="<?php echo esc_url($base_url); ?>" class="nav-tab <?php echo $tab === 'writer' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('AI Writer', 'claude-writer'); ?></a>
+                <a href="<?php echo esc_url($base_url . '&tab=horoscop'); ?>" class="nav-tab <?php echo $tab === 'horoscop' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Horoscop Zilnic', 'claude-writer'); ?></a>
+            </h2>
+
+        <?php
+        if ($tab === 'horoscop') {
+            if (class_exists('HZ_Admin')) {
+                (new HZ_Admin())->render_tab();
+            }
+            echo '</div>';
+            return;
+        }
+
         $models  = CW_Models::all();
         $by      = get_option('cw_usage_by_model', array());
         $total   = (float) get_option('cw_cost_total', 0);
@@ -76,9 +98,6 @@ class CW_Admin {
         $month   = CW_Usage::month_cost();
         $limit   = (float) get_option('cw_monthly_cost_limit', 0);
         ?>
-        <div class="wrap cw-wrap">
-            <h1><?php esc_html_e('AI Writer', 'claude-writer'); ?></h1>
-
             <?php
             // Avertisment: modelul implicit e pe un provider fără cheie configurată.
             $default_provider = CW_Models::provider(CW_Models::default_model());
