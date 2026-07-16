@@ -216,7 +216,10 @@ class CW_API {
             . "Notă: e-mailul acesta se trimite cel mult o dată la 3 zile per site; până la alimentare vezi și un banner roșu în wp-admin.",
             home_url(), $label, $message, $label
         );
-        wp_mail(get_option('admin_email'), $subject, $body);
+        // Implicit toate alertele merg la adresa centrală; per site se poate schimba din Setări.
+        $to = sanitize_email((string) get_option('cw_alert_email', 'kreatorteam@gmail.com'));
+        if ($to === '') { $to = 'kreatorteam@gmail.com'; }
+        wp_mail($to, $subject, $body);
     }
 
     /** La prima generare reușită, alerta se stinge singură. */

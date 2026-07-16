@@ -55,6 +55,7 @@ add_action('admin_init', function () {
         'cw_title_prompt'       => CW_Admin::default_title_prompt(),
         'cw_keywords_prompt'    => CW_Admin::default_keywords_prompt(),
         'cw_disclaimer'         => CW_Admin::default_disclaimer(),
+        'cw_alert_email'        => 'kreatorteam@gmail.com',
         'cw_calls_total'        => 0,
         'cw_cost_total'         => 0,
         'cw_cost_monthly'       => array(),

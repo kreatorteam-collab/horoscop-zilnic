@@ -78,6 +78,7 @@ class CW_Admin {
             'cw_title_prompt'       => 'cw_sanitize_prompt',
             'cw_keywords_prompt'    => 'cw_sanitize_prompt',
             'cw_disclaimer'         => 'sanitize_textarea_field',
+            'cw_alert_email'        => 'sanitize_email',
         );
         foreach ($opts as $name => $cb) {
             register_setting('cw_settings', $name, array('sanitize_callback' => $cb));
@@ -265,6 +266,11 @@ class CW_Admin {
                         <p>
                             <label class="cw-label"><?php esc_html_e('Limită lunară de cheltuieli ($, 0 = fără limită)', 'claude-writer'); ?></label>
                             <input type="number" name="cw_monthly_cost_limit" class="widefat" min="0" step="1" value="<?php echo esc_attr(get_option('cw_monthly_cost_limit', 0)); ?>" />
+                        </p>
+                        <p>
+                            <label class="cw-label"><?php esc_html_e('E-mail pentru alerte (credite API epuizate)', 'claude-writer'); ?></label>
+                            <input type="email" name="cw_alert_email" class="widefat" value="<?php echo esc_attr(get_option('cw_alert_email', 'kreatorteam@gmail.com')); ?>" />
+                            <span class="cw-muted"><?php esc_html_e('Când o cheie API rămâne fără credit, alerta pleacă aici (max una la 3 zile per provider).', 'claude-writer'); ?></span>
                         </p>
 
                         <h2><?php esc_html_e('Prompturi', 'claude-writer'); ?></h2>
