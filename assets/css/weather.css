@@ -1,0 +1,87 @@
+/* Tabel meteo „Vremea azi pe regiuni" — modul Vreme (plugin AI Writer & Conținut Zilnic). */
+.hz-weather-table {
+    margin: 1.6em 0;
+}
+.hz-weather-table .hz-weather-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(16, 24, 40, .06);
+}
+.hz-weather-table table {
+    width: 100%;
+    min-width: 480px;
+    border-collapse: collapse;
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.45;
+    background: #fff;
+}
+.hz-weather-table thead th {
+    background: #1f2a44;
+    color: #fff;
+    text-align: left;
+    padding: 12px 14px;
+    font-weight: 600;
+    font-size: 12.5px;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+.hz-weather-table tbody td {
+    padding: 11px 14px;
+    border-top: 1px solid #eef0f3;
+    vertical-align: middle;
+    color: #1f2937;
+}
+.hz-weather-table tbody tr:first-child td {
+    border-top: none;
+}
+.hz-weather-table .hz-region {
+    font-weight: 700;
+    background: #f6f8fb;
+    vertical-align: middle;
+    white-space: nowrap;
+    color: #111827;
+}
+.hz-weather-table .hz-city {
+    font-weight: 500;
+    white-space: nowrap;
+}
+.hz-weather-table .hz-temp {
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+}
+.hz-weather-table .hz-t-min { color: #2478c8; }
+.hz-weather-table .hz-t-max { color: #d5372c; }
+.hz-weather-table .hz-t-sep { color: #9ca3af; font-weight: 400; }
+.hz-weather-table .hz-sky {
+    min-width: 200px;
+    color: #374151;
+}
+.hz-weather-table figcaption {
+    padding: 10px 4px 0;
+    font-size: 13px;
+    color: #6b7280;
+    font-style: italic;
+    text-align: left;
+}
+
+@media (max-width: 600px) {
+    .hz-weather-table table { font-size: 14px; }
+    .hz-weather-table thead th { padding: 10px 11px; }
+    .hz-weather-table tbody td { padding: 9px 11px; }
+}
+
+/* Temă întunecată (dacă tema o expune prin prefers-color-scheme). */
+@media (prefers-color-scheme: dark) {
+    .hz-weather-table .hz-weather-scroll { border-color: #333a48; box-shadow: none; }
+    .hz-weather-table table { background: #1a1f2b; }
+    .hz-weather-table tbody td { border-top-color: #2a3140; color: #e5e7eb; }
+    .hz-weather-table .hz-region { background: #222838; color: #f3f4f6; }
+    .hz-weather-table .hz-t-min { color: #6db3f2; }
+    .hz-weather-table .hz-t-max { color: #f2837b; }
+    .hz-weather-table .hz-sky { color: #cbd2dc; }
+}

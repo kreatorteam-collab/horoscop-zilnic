@@ -45,9 +45,18 @@ class HZ_Weather {
         add_action(self::HOOK, array($this, 'cron_run'));
         add_action('init', array($this, 'maybe_schedule'));
         add_action('wp_ajax_hzw_test', array($this, 'ajax_test'));
+        add_action('wp_enqueue_scripts', array($this, 'enqueue_front'));
 
         add_action('update_option_hzw_hour', array($this, 'reschedule'), 10, 0);
         add_action('update_option_hzw_enabled', array($this, 'reschedule'), 10, 0);
+    }
+
+    /** Stilul tabelului meteo, doar pe articolele generate de acest modul. */
+    public function enqueue_front() {
+        if (!is_singular()) { return; }
+        $id = get_queried_object_id();
+        if (!$id || get_post_meta($id, '_hz_weather', true) === '') { return; }
+        wp_enqueue_style('hz-weather', HZ_URL . 'assets/css/weather.css', array(), HZ_VERSION);
     }
 
     /* ---- Programare cron (identică ca logică cu horoscopul) ---- */
@@ -252,14 +261,16 @@ class HZ_Weather {
             }
             if ($entry === null) { continue; }
 
-            $desc   = trim((string) $entry->fenomen_descriere);
+            $raw    = trim((string) $entry->fenomen_descriere);
             $region = $map[$name]['region'];
+            // Iconița se deduce din textul BRUT (ASCII, cum vine de la ANM); descrierea
+            // afișată o normalizăm cu diacritice.
             $grouped[$region][] = array(
                 'city' => $map[$name]['city'],
                 'min'  => (int) $entry->temp_min,
                 'max'  => (int) $entry->temp_max,
-                'desc' => $desc !== '' ? $desc : 'Fără informații',
-                'icon' => $this->weather_icon($desc),
+                'desc' => $raw !== '' ? $this->beautify_desc($raw) : 'Fără informații',
+                'icon' => $this->weather_icon($raw),
             );
         }
 
@@ -312,6 +323,38 @@ class HZ_Weather {
         return '🌡️';
     }
 
+    /**
+     * Descrierile ANM vin fără diacritice („descarcari", „slaba", „si"). Le normalizăm
+     * pentru afișare cu strtr (fără mbstring): map cu variantele lowercase + Capitalizat
+     * care pot apărea ca primul cuvânt.
+     */
+    private function beautify_desc($d) {
+        $map = array(
+            ' si '        => ' și ',
+            'descarcari'  => 'descărcări',  'Descarcari'  => 'Descărcări',
+            'descarcare'  => 'descărcare',
+            'electrice'   => 'electrice',
+            'slaba'       => 'slabă',
+            'slabe'       => 'slabe',
+            'ceata'       => 'ceață',        'Ceata'       => 'Ceață',
+            'innorat'     => 'înnorat',      'Innorat'     => 'Înnorat',
+            'innourari'   => 'înnorări',     'Innourari'   => 'Înnorări',
+            'innorari'    => 'înnorări',     'Innorari'    => 'Înnorări',
+            'burnita'     => 'burniță',      'Burnita'     => 'Burniță',
+            'vant'        => 'vânt',
+            'moderata'    => 'moderată',
+            'puternica'   => 'puternică',
+            'ridicata'    => 'ridicată',
+            'scazuta'     => 'scăzută',
+            'insemnate'   => 'însemnate',
+            'insemnata'   => 'însemnată',
+            'inghet'      => 'îngheț',       'Inghet'      => 'Îngheț',
+            'racire'      => 'răcire',
+            'incalzire'   => 'încălzire',
+        );
+        return strtr($d, $map);
+    }
+
     /* ---- Compunerea articolului ---- */
 
     /** Textul cu datele oficiale, dat modelului ca să scrie previziunea (cifrele rămân exacte). */
@@ -328,10 +371,17 @@ class HZ_Weather {
         return implode("\n", $lines);
     }
 
-    /** Tabelul determinist cu temperaturile exacte (autoritatea pe cifre în articol). */
+    /**
+     * Tabelul determinist cu temperaturile exacte (autoritatea pe cifre în articol).
+     * 4 coloane (temperaturile combinate min/max) + wrapper cu scroll orizontal pe mobil.
+     * Stilul de bază vine din assets/css/weather.css; wrapper-ul are și un style inline
+     * (supraviețuiește kses) ca tabelul să nu spargă layout-ul nici fără CSS.
+     */
     private function build_table($regions, $data_afisata) {
-        $html  = '<figure class="wp-block-table hz-weather-table"><table><thead><tr>';
-        $html .= '<th>Regiune</th><th>Oraș</th><th>Minimă</th><th>Maximă</th><th>Cerul</th>';
+        $html  = '<figure class="hz-weather-table">';
+        $html .= '<div class="hz-weather-scroll" style="overflow-x:auto;-webkit-overflow-scrolling:touch;">';
+        $html .= '<table><thead><tr>';
+        $html .= '<th>Regiune</th><th>Oraș</th><th>Temperaturi</th><th>Cerul</th>';
         $html .= '</tr></thead><tbody>';
         foreach ($regions as $region => $cities) {
             $rows  = count($cities);
@@ -339,17 +389,21 @@ class HZ_Weather {
             foreach ($cities as $c) {
                 $html .= '<tr>';
                 if ($first) {
-                    $html .= '<td rowspan="' . (int) $rows . '"><strong>' . esc_html($region) . '</strong></td>';
+                    $html .= '<td class="hz-region" rowspan="' . (int) $rows . '">' . esc_html($region) . '</td>';
                     $first = false;
                 }
-                $html .= '<td>' . esc_html($c['city']) . '</td>';
-                $html .= '<td>' . (int) $c['min'] . '°C</td>';
-                $html .= '<td>' . (int) $c['max'] . '°C</td>';
-                $html .= '<td>' . esc_html($c['icon'] . ' ' . $c['desc']) . '</td>';
+                $temp = '<span class="hz-t-min">' . (int) $c['min'] . '°</span>'
+                      . '<span class="hz-t-sep"> / </span>'
+                      . '<span class="hz-t-max">' . (int) $c['max'] . '°C</span>';
+                $html .= '<td class="hz-city">' . esc_html($c['city']) . '</td>';
+                $html .= '<td class="hz-temp">' . $temp . '</td>';
+                $html .= '<td class="hz-sky">' . esc_html($c['icon']) . ' ' . esc_html($c['desc']) . '</td>';
                 $html .= '</tr>';
             }
         }
-        $html .= '</tbody></table><figcaption>Temperaturile minime și maxime pentru ' . esc_html($data_afisata) . ', date oficiale ANM.</figcaption></figure>';
+        $html .= '</tbody></table></div>';
+        $html .= '<figcaption>Temperaturile minime și maxime pentru ' . esc_html($data_afisata) . ', date oficiale ANM.</figcaption>';
+        $html .= '</figure>';
         return $html;
     }
 
