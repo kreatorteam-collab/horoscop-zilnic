@@ -27,10 +27,10 @@ class CW_Admin {
     }
 
     public function menu() {
-        // Pagina UNICĂ de setări a pluginului: tab „AI Writer" + tab „Horoscop Zilnic".
+        // Pagina UNICĂ de setări a pluginului: tab „AI Writer" + „Horoscop Zilnic" + „Vreme".
         add_options_page(
-            __('AI Writer & Horoscop', 'claude-writer'),
-            __('AI Writer & Horoscop', 'claude-writer'),
+            __('AI Writer & Conținut Zilnic', 'claude-writer'),
+            __('AI Writer & Conținut Zilnic', 'claude-writer'),
             'manage_options',
             'claude-writer',
             array($this, 'render_page')
