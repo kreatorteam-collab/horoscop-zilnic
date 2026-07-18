@@ -5,6 +5,10 @@ $options = array(
     'hz_enabled', 'hz_hour', 'hz_status', 'hz_model', 'hz_category', 'hz_category_id',
     'hz_source_url', 'hz_image', 'hz_title', 'hz_prompt', 'hz_system_prompt',
     'hz_auto_update', 'hz_last_run', 'hz_last_error', 'hz_db_version', 'hz_cw_removed',
+    // Modul Vreme (v3.0.0) — opțiunile hzw_*:
+    'hzw_enabled', 'hzw_hour', 'hzw_status', 'hzw_model', 'hzw_category', 'hzw_category_id',
+    'hzw_source_url', 'hzw_image', 'hzw_cite_source', 'hzw_cache_hours', 'hzw_title',
+    'hzw_prompt', 'hzw_system_prompt', 'hzw_last_run', 'hzw_last_error',
     // Modulul AI Writer inclus (fost plugin claude-writer) — opțiunile cw_*:
     'cw_api_key', 'cw_openai_api_key', 'cw_model_default_gpt56', 'cw_model_default_sonnet',
     'cw_default_model', 'cw_effort', 'cw_temperature', 'cw_max_tokens', 'cw_stream_enabled',
@@ -18,4 +22,7 @@ foreach ($options as $opt) { delete_option($opt); }
 delete_transient('cw_update_info');
 delete_transient('hz_update_info');
 delete_transient('hz_horo_lock');
+delete_transient('hz_weather_lock');
+delete_transient('hz_weather_anm_xml');
 wp_clear_scheduled_hook('hz_horoscope_daily');
+wp_clear_scheduled_hook('hz_weather_daily');

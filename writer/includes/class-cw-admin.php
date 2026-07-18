@@ -88,21 +88,30 @@ class CW_Admin {
     public function render_page() {
         if (!current_user_can('manage_options')) { return; }
 
-        $tab      = (isset($_GET['tab']) && $_GET['tab'] === 'horoscop') ? 'horoscop' : 'writer';
+        $allowed  = array('writer', 'horoscop', 'vreme');
+        $tab      = (isset($_GET['tab']) && in_array($_GET['tab'], $allowed, true)) ? $_GET['tab'] : 'writer';
         $base_url = admin_url('options-general.php?page=claude-writer');
         ?>
         <div class="wrap cw-wrap">
-            <h1><?php esc_html_e('AI Writer & Horoscop Zilnic', 'claude-writer'); ?></h1>
+            <h1><?php esc_html_e('AI Writer & Conținut Zilnic', 'claude-writer'); ?></h1>
 
             <h2 class="nav-tab-wrapper" style="margin-bottom:16px;">
                 <a href="<?php echo esc_url($base_url); ?>" class="nav-tab <?php echo $tab === 'writer' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('AI Writer', 'claude-writer'); ?></a>
                 <a href="<?php echo esc_url($base_url . '&tab=horoscop'); ?>" class="nav-tab <?php echo $tab === 'horoscop' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Horoscop Zilnic', 'claude-writer'); ?></a>
+                <a href="<?php echo esc_url($base_url . '&tab=vreme'); ?>" class="nav-tab <?php echo $tab === 'vreme' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Vreme', 'claude-writer'); ?></a>
             </h2>
 
         <?php
         if ($tab === 'horoscop') {
             if (class_exists('HZ_Admin')) {
                 (new HZ_Admin())->render_tab();
+            }
+            echo '</div>';
+            return;
+        }
+        if ($tab === 'vreme') {
+            if (class_exists('HZ_Admin')) {
+                (new HZ_Admin())->render_weather_tab();
             }
             echo '</div>';
             return;

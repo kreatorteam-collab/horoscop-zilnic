@@ -1,9 +1,9 @@
 <?php
 /**
- * Plugin Name: AI Writer & Horoscop Zilnic
+ * Plugin Name: AI Writer & Conținut Zilnic
  * Plugin URI: https://targetseo.ro/
- * Description: Generează și rescrie articole SEO direct în editor (GPT-5.6 și Claude) și publică automat horoscopul zilnic cu toate cele 12 zodii. Un singur plugin: chei API, costuri, editor și horoscop.
- * Version: 2.3.0
+ * Description: Generează și rescrie articole SEO direct în editor (GPT-5.6 și Claude) și publică automat conținut zilnic: horoscopul cu toate cele 12 zodii și vremea pe principalele regiuni ale țării (date oficiale ANM). Un singur plugin: chei API, costuri, editor, horoscop și vreme.
+ * Version: 3.0.0
  * Author: Eduard / TargetSEO
  * Text Domain: horoscop-zilnic
  * Requires at least: 5.6
@@ -15,7 +15,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('HZ_VERSION', '2.3.0');
+define('HZ_VERSION', '3.0.0');
 define('HZ_PATH', plugin_dir_path(__FILE__));
 define('HZ_URL', plugin_dir_url(__FILE__));
 
@@ -27,12 +27,14 @@ if (!class_exists('CW_API')) {
 }
 
 require_once HZ_PATH . 'includes/class-hz-horoscope.php';
+require_once HZ_PATH . 'includes/class-hz-weather.php';
 require_once HZ_PATH . 'includes/class-hz-admin.php';
 require_once HZ_PATH . 'includes/class-hz-updater.php';
 
 function hz_init() {
     (new HZ_Admin())->init();
     (new HZ_Horoscope())->init();
+    (new HZ_Weather())->init();
     (new HZ_Updater())->init();
 }
 add_action('plugins_loaded', 'hz_init');
@@ -116,6 +118,28 @@ add_action('init', function () {
         add_option('hz_category_id', $seed, '', 'no');
     }
 
+    // v3.0.0: modul nou „Vreme" (articol zilnic cu prognoza pe regiuni, sursă ANM).
+    // Seed pentru opțiunile hzw_* pe site-urile deja instalate (add_option nu suprascrie
+    // dacă userul a salvat deja ceva).
+    $weather_defaults = array(
+        'hzw_enabled'       => 0,
+        'hzw_hour'          => 8,
+        'hzw_status'        => 'publish',
+        'hzw_model'         => '',
+        'hzw_category'      => 'Vremea',
+        'hzw_category_id'   => 0,
+        'hzw_source_url'    => HZ_Weather::default_source_url(),
+        'hzw_image'         => 0,
+        'hzw_cite_source'   => 1,
+        'hzw_cache_hours'   => 3,
+        'hzw_title'         => HZ_Weather::default_title(),
+        'hzw_prompt'        => HZ_Weather::default_prompt(),
+        'hzw_system_prompt' => HZ_Weather::default_system_prompt(),
+    );
+    foreach ($weather_defaults as $name => $value) {
+        add_option($name, $value, '', 'no');
+    }
+
     update_option('hz_db_version', HZ_VERSION, 'no');
 });
 
@@ -133,6 +157,20 @@ register_activation_hook(__FILE__, function () {
         'hz_prompt'        => HZ_Horoscope::default_prompt(),
         'hz_system_prompt' => HZ_Horoscope::default_system_prompt(),
         'hz_auto_update'   => 1,
+        // Modul Vreme (v3.0.0)
+        'hzw_enabled'       => 0,
+        'hzw_hour'          => 8,
+        'hzw_status'        => 'publish',
+        'hzw_model'         => '',
+        'hzw_category'      => 'Vremea',
+        'hzw_category_id'   => 0,
+        'hzw_source_url'    => HZ_Weather::default_source_url(),
+        'hzw_image'         => 0,
+        'hzw_cite_source'   => 1,
+        'hzw_cache_hours'   => 3,
+        'hzw_title'         => HZ_Weather::default_title(),
+        'hzw_prompt'        => HZ_Weather::default_prompt(),
+        'hzw_system_prompt' => HZ_Weather::default_system_prompt(),
     );
     foreach ($defaults as $name => $value) {
         add_option($name, $value, '', 'no');
@@ -141,4 +179,5 @@ register_activation_hook(__FILE__, function () {
 
 register_deactivation_hook(__FILE__, function () {
     wp_clear_scheduled_hook(HZ_Horoscope::HOOK);
+    wp_clear_scheduled_hook(HZ_Weather::HOOK);
 });

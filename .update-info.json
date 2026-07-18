@@ -1,12 +1,12 @@
 {
-  "name": "AI Writer & Horoscop Zilnic",
+  "name": "AI Writer & Conținut Zilnic",
   "slug": "horoscop-zilnic",
-  "version": "2.3.0",
+  "version": "3.0.0",
   "tested": "6.7",
   "requires": "5.6",
   "requires_php": "7.4",
   "package": "https://github.com/kreatorteam-collab/horoscop-zilnic/archive/refs/heads/main.zip",
   "url": "https://github.com/kreatorteam-collab/horoscop-zilnic",
   "changelog_url": "https://github.com/kreatorteam-collab/horoscop-zilnic/commits/main",
-  "description": "Generează și rescrie articole SEO direct în editor (GPT-5.6 și Claude) și publică automat horoscopul zilnic cu toate cele 12 zodii. Un singur plugin: chei API, costuri, editor și horoscop. Include și elimină automat vechiul plugin AI Writer (claude-writer)."
+  "description": "Generează și rescrie articole SEO direct în editor (GPT-5.6 și Claude) și publică automat conținut zilnic: horoscopul cu toate cele 12 zodii și vremea pe principalele regiuni ale țării (date oficiale ANM). Un singur plugin: chei API, costuri, editor, horoscop și vreme. Include și elimină automat vechiul plugin AI Writer (claude-writer)."
 }
