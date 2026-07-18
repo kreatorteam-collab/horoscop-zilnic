@@ -60,6 +60,7 @@ class HZ_Admin {
             'hzw_model'         => 'sanitize_text_field',
             'hzw_category'      => 'sanitize_text_field',
             'hzw_category_id'   => 'absint',
+            'hzw_author'        => 'absint',
             'hzw_source_url'    => 'esc_url_raw',
             'hzw_image'         => 'absint',
             'hzw_cite_source'   => 'absint',
@@ -336,6 +337,23 @@ class HZ_Admin {
                             ));
                             ?>
                             <p class="description"><?php esc_html_e('Categoria în care se publică articolele meteo. Dacă nu alegi nimic, se folosește (și se creează la nevoie) categoria „Vremea".', 'horoscop-zilnic'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="hzw_author"><?php esc_html_e('Publică drept', 'horoscop-zilnic'); ?></label></th>
+                        <td>
+                            <?php
+                            wp_dropdown_users(array(
+                                'name'              => 'hzw_author',
+                                'id'                => 'hzw_author',
+                                'selected'          => (int) get_option('hzw_author', 0),
+                                'who'               => 'authors',
+                                'include_selected'  => true,
+                                'show_option_none'  => __('— Administrator implicit —', 'horoscop-zilnic'),
+                                'option_none_value' => 0,
+                            ));
+                            ?>
+                            <p class="description"><?php esc_html_e('Utilizatorul afișat ca autor al articolelor de vreme. „Administrator implicit" = primul administrator al site-ului.', 'horoscop-zilnic'); ?></p>
                         </td>
                     </tr>
                     <tr>

@@ -7,7 +7,7 @@ $options = array(
     'hz_auto_update', 'hz_last_run', 'hz_last_error', 'hz_db_version', 'hz_cw_removed',
     // Modul Vreme (v3.0.0) — opțiunile hzw_*:
     'hzw_enabled', 'hzw_hour', 'hzw_status', 'hzw_model', 'hzw_category', 'hzw_category_id',
-    'hzw_source_url', 'hzw_image', 'hzw_cite_source', 'hzw_cache_hours', 'hzw_title',
+    'hzw_author', 'hzw_source_url', 'hzw_image', 'hzw_cite_source', 'hzw_cache_hours', 'hzw_title',
     'hzw_prompt', 'hzw_system_prompt', 'hzw_last_run', 'hzw_last_error',
     // Modulul AI Writer inclus (fost plugin claude-writer) — opțiunile cw_*:
     'cw_api_key', 'cw_openai_api_key', 'cw_model_default_gpt56', 'cw_model_default_sonnet',
