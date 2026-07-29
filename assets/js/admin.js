@@ -133,7 +133,7 @@
                         '<td>' + detail + '</td></tr>';
                 });
                 $queue.html(rows);
-                var info = 'Descărcări Magnific azi: ' + d.downloads + '.';
+                var info = 'Descărcări Magnific azi: ' + d.downloads + ' (cota se resetează ' + esc(d.reset) + ').';
                 if (d.pending > 0) { info += ' În lucru: ' + d.pending + ' articole.'; }
                 if (d.stopped) { info += ' ⏸ Procesarea e OPRITĂ — apasă „Repornește procesarea".'; }
                 if (d.paused) { info += ' ⚠ ' + esc(d.paused); }

@@ -52,16 +52,19 @@ class HZ_Magnific {
     /** Marchează cota de azi drept consumată (contul a refuzat descărcarea). */
     public static function mark_exhausted() {
         update_option('hzb_dl_day', array(
-            'date'  => current_time('Y-m-d'),
+            'date'  => gmdate('Y-m-d'),
             'count' => self::daily_limit(),
         ), 'no');
     }
 
-    /* ---- Limita zilnică de descărcări ---- */
+    /* ---- Limita zilnică de descărcări ----
+     * Cota Magnific se resetează la 00:00 UTC (03:00 ora României vara), deci
+     * „ziua" contorului e ziua UTC, nu ziua site-ului — altfel reluarea coadei
+     * ar porni cu ore înainte de resetul real și ar lovi iar refuzul. */
 
     public static function downloads_today() {
         $c = get_option('hzb_dl_day', array());
-        if (!is_array($c) || !isset($c['date']) || $c['date'] !== current_time('Y-m-d')) {
+        if (!is_array($c) || !isset($c['date']) || $c['date'] !== gmdate('Y-m-d')) {
             return 0;
         }
         return (int) $c['count'];
@@ -77,13 +80,18 @@ class HZ_Magnific {
     }
 
     private static function log_download() {
-        $today = current_time('Y-m-d');
+        $today = gmdate('Y-m-d');
         $c = get_option('hzb_dl_day', array());
         if (!is_array($c) || !isset($c['date']) || $c['date'] !== $today) {
             $c = array('date' => $today, 'count' => 0);
         }
         $c['count']++;
         update_option('hzb_dl_day', $c, 'no');
+    }
+
+    /** Timestamp-ul următorului reset de cotă: 00:10 UTC (marja de 10 min). */
+    public static function next_reset_ts() {
+        return (new DateTimeImmutable('tomorrow 00:10', new DateTimeZone('UTC')))->getTimestamp();
     }
 
     /* ---- Căutare ---- */

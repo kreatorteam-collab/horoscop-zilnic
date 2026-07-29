@@ -170,6 +170,7 @@ class HZ_Bulk {
             'items'     => $items,
             'pending'   => $pending,
             'downloads' => HZ_Magnific::downloads_today() . '/' . HZ_Magnific::daily_limit(),
+            'reset'     => wp_date('d.m H:i', HZ_Magnific::next_reset_ts()),
             'paused'    => (string) get_option('hzb_paused_reason', ''),
             'stopped'   => (int) get_option('hzb_stopped', 0),
         ));
@@ -255,10 +256,15 @@ class HZ_Bulk {
         // punem coada pe pauză până mâine în loc să publicăm articole fără poze.
         $images = max(0, min(3, (int) get_option('hzb_images', 2)));
         if ($images > 0 && HZ_Magnific::has_key() && HZ_Magnific::limit_reached()) {
-            update_option('hzb_paused_reason', 'Limita zilnică de descărcări Magnific e atinsă — coada continuă singură mâine.', 'no');
+            // Cota Magnific se resetează la 00:00 UTC — reluăm exact atunci, nu la
+            // miezul nopții local (în România ar însemna 2-3 ore de așteptare inutilă
+            // sau, invers, o repornire prea devreme care lovește iar refuzul).
+            $t = HZ_Magnific::next_reset_ts();
+            update_option('hzb_paused_reason', sprintf(
+                'Cota zilnică de descărcări Magnific e atinsă — coada continuă singură la %s (resetul e la 00:00 UTC).',
+                wp_date('d.m.Y H:i', $t)
+            ), 'no');
             delete_transient(self::LOCK);
-            $tz  = wp_timezone();
-            $t   = (new DateTimeImmutable('tomorrow 00:10', $tz))->getTimestamp();
             if (!wp_next_scheduled(self::HOOK)) {
                 wp_schedule_single_event($t, self::HOOK);
             }
