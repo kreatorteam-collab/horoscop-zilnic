@@ -87,6 +87,7 @@ class HZ_Admin {
             'hzb_images'       => 'absint',
             'hzb_image_size'   => 'sanitize_text_field',
             'hzb_daily_limit'  => 'absint',
+            'hzb_gap'          => 'absint',
             'hzb_length'       => 'absint',
             'hzb_author'       => 'absint',
             'hzb_ai_excluded'  => 'absint',
@@ -586,6 +587,13 @@ class HZ_Admin {
                         <td>
                             <input type="number" name="hzb_daily_limit" id="hzb_daily_limit" min="1" max="100" value="<?php echo esc_attr((int) get_option('hzb_daily_limit', 90)); ?>" />
                             <p class="description"><?php esc_html_e('Contul Magnific permite ~100 descărcări de stock/zi. Dacă aceeași cheie e folosită pe mai multe site-uri, împarte limita între ele (ex. 2 site-uri = câte 45).', 'horoscop-zilnic'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="hzb_gap"><?php esc_html_e('Pauză între articole (secunde)', 'horoscop-zilnic'); ?></label></th>
+                        <td>
+                            <input type="number" name="hzb_gap" id="hzb_gap" min="5" max="3600" step="5" value="<?php echo esc_attr((int) get_option('hzb_gap', 120)); ?>" />
+                            <p class="description"><?php esc_html_e('Așteptare între terminarea unui articol și începerea următorului. Un ritm mai lent menajează limitele API și arată natural (ex. 300 = un articol la ~5-7 minute).', 'horoscop-zilnic'); ?></p>
                         </td>
                     </tr>
                     <tr>

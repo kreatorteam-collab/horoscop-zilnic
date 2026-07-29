@@ -280,10 +280,12 @@ class HZ_Bulk {
 
         delete_transient(self::LOCK);
 
-        // Mai e ceva de lucru? Înlănțuim următoarea rulare.
+        // Mai e ceva de lucru? Înlănțuim următoarea rulare, cu pauza dintre
+        // articole setată de user (ritm natural de publicare + menajează API-urile).
         foreach ($this->queue() as $item) {
             if ($item['s'] === 'pending') {
-                $this->kick(5);
+                $gap = (int) get_option('hzb_gap', 120);
+                $this->kick(max(5, min(3600, $gap)));
                 break;
             }
         }
@@ -352,7 +354,9 @@ class HZ_Bulk {
                     $att = HZ_Magnific::sideload($r['id'], 0, $title);
                     if (is_wp_error($att)) {
                         $img_note = $att->get_error_message();
-                        if ($att->get_error_code() === 'hzb_limit') { break; }
+                        // Cota locală SAU cea a contului e goală: nu mai încercăm nimic azi
+                        // (tick-ul următor pune coada pe pauză până mâine).
+                        if (in_array($att->get_error_code(), array('hzb_limit', 'hzb_credits'), true)) { break; }
                         continue; // o resursă coruptă nu oprește restul
                     }
                     HZ_Magnific::mark_used($r['id']);

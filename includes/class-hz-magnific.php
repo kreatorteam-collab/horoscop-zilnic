@@ -28,6 +28,35 @@ class HZ_Magnific {
         );
     }
 
+    /**
+     * Toate apelurile către Magnific trec pe aici: pauză de 2s înainte de fiecare
+     * cerere (limita lor e 50/min per cheie, dar rafalele dau 429) + un retry cu
+     * așteptare de 15s la „Too many requests".
+     */
+    private static function request($url, $timeout) {
+        sleep(2);
+        for ($try = 0; $try < 2; $try++) {
+            $response = wp_remote_get($url, array('headers' => self::headers(), 'timeout' => $timeout));
+            if (is_wp_error($response)) { return $response; }
+            $code = wp_remote_retrieve_response_code($response);
+            $body = (string) wp_remote_retrieve_body($response);
+            if ($code === 429 || stripos($body, 'Too many requests') !== false) {
+                sleep(15);
+                continue;
+            }
+            return $response;
+        }
+        return $response;
+    }
+
+    /** Marchează cota de azi drept consumată (contul a refuzat descărcarea). */
+    public static function mark_exhausted() {
+        update_option('hzb_dl_day', array(
+            'date'  => current_time('Y-m-d'),
+            'count' => self::daily_limit(),
+        ), 'no');
+    }
+
     /* ---- Limita zilnică de descărcări ---- */
 
     public static function downloads_today() {
@@ -92,7 +121,7 @@ class HZ_Magnific {
 
     private static function do_search($args) {
         $url = self::API_BASE . '/v1/resources?' . http_build_query($args);
-        $response = wp_remote_get($url, array('headers' => self::headers(), 'timeout' => 30));
+        $response = self::request($url, 30);
         if (is_wp_error($response)) {
             return new WP_Error('hzb_http', 'Magnific: eroare de conexiune: ' . $response->get_error_message());
         }
@@ -134,7 +163,7 @@ class HZ_Magnific {
         if (!in_array($size, array('small', 'medium', 'large', 'original'), true)) { $size = 'large'; }
 
         $url = self::API_BASE . '/v1/resources/' . (int) $resource_id . '/download?image_size=' . $size;
-        $response = wp_remote_get($url, array('headers' => self::headers(), 'timeout' => 60));
+        $response = self::request($url, 60);
         if (is_wp_error($response)) {
             return new WP_Error('hzb_http', 'Magnific: descărcarea a eșuat: ' . $response->get_error_message());
         }
@@ -142,6 +171,12 @@ class HZ_Magnific {
         $body = json_decode(wp_remote_retrieve_body($response), true);
         if ($code !== 200 || !isset($body['data']['url'])) {
             $msg = is_array($body) && isset($body['message']) ? $body['message'] : ('HTTP ' . $code);
+            // „Insufficient credits" la stock = cota de descărcări a CONTULUI e goală
+            // azi (contorul local nu vede alte site-uri care folosesc aceeași cheie).
+            if (stripos($msg, 'insufficient credits') !== false) {
+                self::mark_exhausted();
+                return new WP_Error('hzb_credits', 'Cota de descărcări de stock a contului Magnific e epuizată azi.');
+            }
             return new WP_Error('hzb_api', 'Magnific: descărcarea a eșuat (' . $msg . ').');
         }
         self::log_download();
