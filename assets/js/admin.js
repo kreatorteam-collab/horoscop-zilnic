@@ -135,8 +135,11 @@
                 $queue.html(rows);
                 var info = 'Descărcări Magnific azi: ' + d.downloads + '.';
                 if (d.pending > 0) { info += ' În lucru: ' + d.pending + ' articole.'; }
+                if (d.stopped) { info += ' ⏸ Procesarea e OPRITĂ — apasă „Repornește procesarea".'; }
                 if (d.paused) { info += ' ⚠ ' + esc(d.paused); }
                 $('#hzb-progress').html(info);
+                $('#hzb-toggle').data('stopped', d.stopped ? 1 : 0)
+                    .text(d.stopped ? 'Repornește procesarea' : 'Oprește procesarea');
                 // Poll des cât timp se lucrează, rar când e liniște.
                 clearTimeout(refresh.timer);
                 refresh.timer = setTimeout(refresh, d.pending > 0 ? 5000 : 30000);
@@ -168,6 +171,11 @@
             }).always(function () {
                 $btn.prop('disabled', false);
             });
+        });
+
+        $('#hzb-toggle').on('click', function () {
+            var stopNow = $(this).data('stopped') ? 0 : 1;
+            $.post(HZAdmin.ajaxUrl, { action: 'hzb_toggle', nonce: HZAdmin.nonce, stop: stopNow }).done(refresh);
         });
 
         $('#hzb-retry').on('click', function () {

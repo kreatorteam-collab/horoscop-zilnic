@@ -526,9 +526,10 @@ class HZ_Admin {
                 <span id="hzb-progress" class="description"></span>
             </p>
             <p>
+                <button type="button" class="button button-primary" id="hzb-toggle" data-stopped="<?php echo (int) get_option('hzb_stopped', 0); ?>"><?php echo (int) get_option('hzb_stopped', 0) ? esc_html__('Repornește procesarea', 'horoscop-zilnic') : esc_html__('Oprește procesarea', 'horoscop-zilnic'); ?></button>
                 <button type="button" class="button" id="hzb-retry"><?php esc_html_e('Reîncearcă erorile', 'horoscop-zilnic'); ?></button>
                 <button type="button" class="button" id="hzb-clear"><?php esc_html_e('Golește coada', 'horoscop-zilnic'); ?></button>
-                <span class="description"><?php esc_html_e('Golirea coadei NU șterge articolele deja create.', 'horoscop-zilnic'); ?></span>
+                <span class="description"><?php esc_html_e('Oprirea lasă articolul în lucru să se termine; golirea coadei NU șterge articolele deja create.', 'horoscop-zilnic'); ?></span>
             </p>
             <table class="widefat striped" style="max-width:900px;">
                 <thead>

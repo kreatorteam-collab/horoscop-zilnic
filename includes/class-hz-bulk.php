@@ -22,6 +22,7 @@ class HZ_Bulk {
         add_action('wp_ajax_hzb_status', array($this, 'ajax_status'));
         add_action('wp_ajax_hzb_retry', array($this, 'ajax_retry'));
         add_action('wp_ajax_hzb_clear', array($this, 'ajax_clear'));
+        add_action('wp_ajax_hzb_toggle', array($this, 'ajax_toggle'));
     }
 
     /* ---- Coada (stocată în opțiune, fără autoload) ---- */
@@ -37,12 +38,28 @@ class HZ_Bulk {
 
     /** Programează procesarea imediat, dacă nu rulează deja ceva. */
     private function kick($delay = 1) {
+        if ((int) get_option('hzb_stopped', 0)) { return; } // oprit de user
         if (!wp_next_scheduled(self::HOOK)) {
             wp_schedule_single_event(time() + max(1, (int) $delay), self::HOOK);
         }
         if (!get_transient(self::LOCK) && function_exists('spawn_cron')) {
             spawn_cron();
         }
+    }
+
+    /** Normalizare titlu pentru comparat dubluri (spații, majuscule). */
+    private function norm_title($t) {
+        return mb_strtolower(trim(preg_replace('/\s+/u', ' ', (string) $t)));
+    }
+
+    /** True dacă există deja un articol (orice stare relevantă) cu acest titlu. */
+    private function post_title_exists($title) {
+        global $wpdb;
+        $found = $wpdb->get_var($wpdb->prepare(
+            "SELECT ID FROM {$wpdb->posts} WHERE post_type = 'post' AND post_status IN ('publish','draft','pending','future','private') AND post_title = %s LIMIT 1",
+            wp_strip_all_tags($title)
+        ));
+        return !empty($found);
     }
 
     /* ---- AJAX ---- */
@@ -79,8 +96,23 @@ class HZ_Bulk {
         $extra  = isset($_POST['extra']) ? sanitize_textarea_field(wp_unslash($_POST['extra'])) : '';
         $extra  = mb_substr($extra, 0, 2000);
 
+        // Anti-dubluri: sărim titlurile care sunt deja în coadă SAU au deja un
+        // articol pe site (publicat/ciornă/programat) — lista poate fi lipită de
+        // două ori sau poate conține subiecte deja scrise.
         $q = $this->queue();
+        $known = array();
+        foreach ($q as $item) {
+            $known[$this->norm_title($item['t'])] = 1;
+        }
+        $added   = 0;
+        $skipped = 0;
         foreach ($titles as $t) {
+            $key = $this->norm_title($t);
+            if (isset($known[$key]) || $this->post_title_exists($t)) {
+                $skipped++;
+                continue;
+            }
+            $known[$key] = 1;
             $q[] = array(
                 't'       => $t,
                 's'       => 'pending',
@@ -93,13 +125,16 @@ class HZ_Bulk {
                 'note'    => '',
                 'cost'    => 0.0,
             );
+            $added++;
         }
         $this->save_queue($q);
-        $this->kick();
+        if ($added > 0) { $this->kick(); }
 
-        wp_send_json_success(array(
-            'message' => sprintf('%d articole adăugate în coadă.', count($titles)),
-        ));
+        $msg = sprintf('%d articole adăugate în coadă.', $added);
+        if ($skipped > 0) {
+            $msg .= sprintf(' %d sărite (deja în coadă sau articol existent cu același titlu).', $skipped);
+        }
+        wp_send_json_success(array('message' => $msg));
     }
 
     public function ajax_status() {
@@ -116,7 +151,7 @@ class HZ_Bulk {
         // Plasă de siguranță: dacă există lucru de făcut dar cronul a adormit
         // (site fără trafic, event pierdut), îl repornim din poll-ul paginii.
         if ($pending > 0 && !get_transient(self::LOCK)) {
-            $this->kick();
+            $this->kick(); // nu face nimic dacă procesarea e oprită de user
         }
 
         $items = array();
@@ -136,6 +171,27 @@ class HZ_Bulk {
             'pending'   => $pending,
             'downloads' => HZ_Magnific::downloads_today() . '/' . HZ_Magnific::daily_limit(),
             'paused'    => (string) get_option('hzb_paused_reason', ''),
+            'stopped'   => (int) get_option('hzb_stopped', 0),
+        ));
+    }
+
+    /** Oprește / repornește procesarea coadei (articolul în lucru se termină). */
+    public function ajax_toggle() {
+        check_ajax_referer('hz_admin_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('message' => 'Permisiune refuzată.'));
+        }
+        $stop = isset($_POST['stop']) ? (int) $_POST['stop'] : 1;
+        update_option('hzb_stopped', $stop ? 1 : 0, 'no');
+        if (!$stop) {
+            $this->kick();
+        } else {
+            wp_clear_scheduled_hook(self::HOOK);
+        }
+        wp_send_json_success(array(
+            'message' => $stop
+                ? 'Procesarea a fost oprită. Articolul aflat în lucru se termină, restul așteaptă.'
+                : 'Procesarea a fost repornită.',
         ));
     }
 
@@ -178,6 +234,7 @@ class HZ_Bulk {
     /* ---- Procesare (un articol per rulare de cron) ---- */
 
     public function process_tick() {
+        if ((int) get_option('hzb_stopped', 0)) { return; }
         if (get_transient(self::LOCK)) { return; }
         if (!class_exists('CW_API') || !CW_API::has_key()) { return; }
         set_transient(self::LOCK, 1, 15 * MINUTE_IN_SECONDS);
@@ -232,6 +289,9 @@ class HZ_Bulk {
         }
     }
 
+    /* Nota itemului spune mereu CE s-a întâmplat cu imaginile — un articol fără
+     * poză nu e o eroare a articolului, dar motivul trebuie să fie vizibil în coadă. */
+
     /** Procesează un item: generare articol + imagini. Returnează itemul actualizat. */
     private function process_item($item) {
         $title = (string) $item['t'];
@@ -272,6 +332,9 @@ class HZ_Bulk {
         $images    = max(0, min(3, (int) get_option('hzb_images', 2)));
         $att_ids   = array();
         $img_note  = '';
+        if ($images > 0 && !HZ_Magnific::has_key()) {
+            $img_note = 'cheia API Magnific nu e configurată în setările de mai jos';
+        }
         if ($images > 0 && HZ_Magnific::has_key()) {
             $qr = CW_API::generate($model, 'Translate this Romanian article title into a short English stock photo search query (3-5 generic, visual keywords). Reply with ONLY the keywords, nothing else: ' . $title, 100);
             $query = is_wp_error($qr) ? '' : trim(preg_replace('/[^\p{L}\p{N} \-]/u', '', $qr['text']));
@@ -335,9 +398,11 @@ class HZ_Bulk {
         $item['post_id'] = (int) $post_id;
         $item['cost']    = $cost;
         $item['err']     = '';
-        $item['note']    = $img_note !== ''
-            ? ('Fără imagine: ' . $img_note)
-            : (count($att_ids) . ' imagini');
+        if (count($att_ids) === 0) {
+            $item['note'] = 'Fără imagine' . ($img_note !== '' ? ': ' . $img_note : '');
+        } else {
+            $item['note'] = count($att_ids) . ' imagini' . ($img_note !== '' ? ' (' . $img_note . ')' : '');
+        }
         return $item;
     }
 
