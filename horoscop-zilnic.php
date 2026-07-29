@@ -2,8 +2,8 @@
 /**
  * Plugin Name: AI Writer & Conținut Zilnic
  * Plugin URI: https://targetseo.ro/
- * Description: Generează și rescrie articole SEO direct în editor (GPT-5.6 și Claude) și publică automat conținut zilnic: horoscopul cu toate cele 12 zodii și vremea pe principalele regiuni ale țării (date oficiale ANM). Un singur plugin: chei API, costuri, editor, horoscop și vreme.
- * Version: 3.0.4
+ * Description: Generează și rescrie articole SEO direct în editor (GPT-5.6 și Claude), creează articole în bulk cu imagini de stock relevante (Magnific) și publică automat conținut zilnic: horoscopul cu toate cele 12 zodii și vremea pe regiuni (date oficiale ANM). Un singur plugin: chei API, costuri, editor, bulk, horoscop și vreme.
+ * Version: 3.1.0
  * Author: Eduard / TargetSEO
  * Text Domain: horoscop-zilnic
  * Requires at least: 5.6
@@ -15,7 +15,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('HZ_VERSION', '3.0.4');
+define('HZ_VERSION', '3.1.0');
 define('HZ_PATH', plugin_dir_path(__FILE__));
 define('HZ_URL', plugin_dir_url(__FILE__));
 
@@ -28,6 +28,8 @@ if (!class_exists('CW_API')) {
 
 require_once HZ_PATH . 'includes/class-hz-horoscope.php';
 require_once HZ_PATH . 'includes/class-hz-weather.php';
+require_once HZ_PATH . 'includes/class-hz-magnific.php';
+require_once HZ_PATH . 'includes/class-hz-bulk.php';
 require_once HZ_PATH . 'includes/class-hz-admin.php';
 require_once HZ_PATH . 'includes/class-hz-updater.php';
 
@@ -35,6 +37,7 @@ function hz_init() {
     (new HZ_Admin())->init();
     (new HZ_Horoscope())->init();
     (new HZ_Weather())->init();
+    (new HZ_Bulk())->init();
     (new HZ_Updater())->init();
 }
 add_action('plugins_loaded', 'hz_init');
@@ -141,8 +144,26 @@ add_action('init', function () {
         add_option($name, $value, '', 'no');
     }
 
+    // v3.1.0: modul nou „Articole Bulk" (generare în lot + imagini de stock Magnific).
+    foreach (hz_bulk_defaults() as $name => $value) {
+        add_option($name, $value, '', 'no');
+    }
+
     update_option('hz_db_version', HZ_VERSION, 'no');
 });
+
+/** Valorile implicite ale modulului Articole Bulk (folosite la update ȘI la activare). */
+function hz_bulk_defaults() {
+    return array(
+        'hzb_magnific_key' => '',
+        'hzb_images'       => 2,
+        'hzb_image_size'   => 'large',
+        'hzb_daily_limit'  => 90,
+        'hzb_length'       => 1000,
+        'hzb_author'       => 0,
+        'hzb_ai_excluded'  => 1,
+    );
+}
 
 register_activation_hook(__FILE__, function () {
     $defaults = array(
@@ -177,9 +198,13 @@ register_activation_hook(__FILE__, function () {
     foreach ($defaults as $name => $value) {
         add_option($name, $value, '', 'no');
     }
+    foreach (hz_bulk_defaults() as $name => $value) {
+        add_option($name, $value, '', 'no');
+    }
 });
 
 register_deactivation_hook(__FILE__, function () {
     wp_clear_scheduled_hook(HZ_Horoscope::HOOK);
     wp_clear_scheduled_hook(HZ_Weather::HOOK);
+    wp_clear_scheduled_hook(HZ_Bulk::HOOK);
 });

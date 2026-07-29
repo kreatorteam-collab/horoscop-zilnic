@@ -13,6 +13,14 @@ class HZ_Admin {
         add_action('admin_init', array($this, 'redirect_legacy_page'));
         add_action('admin_enqueue_scripts', array($this, 'enqueue'));
         add_action('wp_ajax_hz_import_image', array($this, 'ajax_import_image'));
+
+        // Cheia Magnific se stochează criptat, ca și cheile AI: câmp gol la salvare
+        // = păstrează cheia existentă.
+        add_filter('pre_update_option_hzb_magnific_key', function ($value, $old) {
+            $value = is_string($value) ? trim($value) : '';
+            if ($value === '') { return $old; }
+            return CW_Crypto::encrypt($value);
+        }, 10, 2);
     }
 
     /** Vechiul link Setări → Horoscop Zilnic redirecționează la tab-ul din pagina unică. */
@@ -71,6 +79,20 @@ class HZ_Admin {
         );
         foreach ($wopts as $name => $cb) {
             register_setting('hzw_settings', $name, array('sanitize_callback' => $cb));
+        }
+
+        // Modul Articole Bulk (v3.1.0) — grup de setări separat.
+        $bopts = array(
+            'hzb_magnific_key' => 'sanitize_text_field',
+            'hzb_images'       => 'absint',
+            'hzb_image_size'   => 'sanitize_text_field',
+            'hzb_daily_limit'  => 'absint',
+            'hzb_length'       => 'absint',
+            'hzb_author'       => 'absint',
+            'hzb_ai_excluded'  => 'absint',
+        );
+        foreach ($bopts as $name => $cb) {
+            register_setting('hzb_settings', $name, array('sanitize_callback' => $cb));
         }
     }
 
@@ -417,6 +439,186 @@ class HZ_Admin {
                 <span id="hzw-test-result"></span>
             </p>
             <p class="description" style="max-width:640px;"><?php esc_html_e('Creează acum o ciornă de probă cu setările SALVATE (salvează întâi modificările; durează 1–2 minute). Trage datele live de la ANM. Nu afectează rularea zilnică.', 'horoscop-zilnic'); ?></p>
+        <?php
+    }
+
+    /** Conținutul tab-ului „Articole Bulk" din pagina unică de setări. */
+    public function render_bulk_tab() {
+        if (!current_user_can('manage_options')) { return; }
+
+        $has_ai_key  = CW_API::has_key();
+        $has_mg_key  = HZ_Magnific::has_key();
+        $models      = CW_Models::all();
+        ?>
+            <?php if (!$has_ai_key) : ?>
+                <div class="notice notice-warning"><p><?php esc_html_e('Configurează întâi cheia API (OpenAI sau Anthropic) în tab-ul AI Writer.', 'horoscop-zilnic'); ?></p></div>
+            <?php endif; ?>
+            <?php if (!$has_mg_key) : ?>
+                <div class="notice notice-warning"><p><?php esc_html_e('Pune cheia API Magnific în setările de mai jos ca articolele să primească imagini de stock. Fără cheie, articolele se generează fără imagini.', 'horoscop-zilnic'); ?></p></div>
+            <?php endif; ?>
+
+            <p style="max-width:720px;">
+                <?php esc_html_e('Dai lista de titluri, alegi categoria, iar pluginul generează articolele pe rând (AI, stilul editorial din AI Writer) și le pune automat imagini de stock relevante din Magnific: prima ca imagine reprezentativă, restul în corpul articolului.', 'horoscop-zilnic'); ?>
+            </p>
+
+            <h2><?php esc_html_e('Lot nou de articole', 'horoscop-zilnic'); ?></h2>
+            <table class="form-table" role="presentation" style="max-width:720px;">
+                <tr>
+                    <th scope="row"><label for="hzb-titles"><?php esc_html_e('Titluri (unul pe linie)', 'horoscop-zilnic'); ?></label></th>
+                    <td>
+                        <textarea id="hzb-titles" class="large-text code" rows="8" placeholder="Cum alegi anvelopele de iarnă potrivite&#10;Top 10 destinații de city-break în 2026&#10;..."></textarea>
+                        <p class="description"><?php esc_html_e('Maximum 100 de titluri per lot. Numerotarea (1., 2., -) e curățată automat.', 'horoscop-zilnic'); ?></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="hzb-category"><?php esc_html_e('Categoria', 'horoscop-zilnic'); ?></label></th>
+                    <td>
+                        <?php
+                        wp_dropdown_categories(array(
+                            'name'              => 'hzb-category',
+                            'id'                => 'hzb-category',
+                            'hide_empty'        => false,
+                            'hierarchical'      => true,
+                            'show_option_none'  => __('— Categoria implicită a site-ului —', 'horoscop-zilnic'),
+                            'option_none_value' => 0,
+                        ));
+                        ?>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="hzb-status"><?php esc_html_e('Stare articole', 'horoscop-zilnic'); ?></label></th>
+                    <td>
+                        <select id="hzb-status">
+                            <option value="draft"><?php esc_html_e('Ciornă (le publici manual)', 'horoscop-zilnic'); ?></option>
+                            <option value="publish"><?php esc_html_e('Publicate direct', 'horoscop-zilnic'); ?></option>
+                            <option value="pending"><?php esc_html_e('În așteptare', 'horoscop-zilnic'); ?></option>
+                        </select>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="hzb-model"><?php esc_html_e('Model', 'horoscop-zilnic'); ?></label></th>
+                    <td>
+                        <select id="hzb-model">
+                            <option value=""><?php esc_html_e('Modelul implicit din AI Writer', 'horoscop-zilnic'); ?></option>
+                            <?php foreach ($models as $id => $m) : ?>
+                                <option value="<?php echo esc_attr($id); ?>"><?php echo esc_html($m['label']); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="hzb-extra"><?php esc_html_e('Instrucțiuni suplimentare (opțional)', 'horoscop-zilnic'); ?></label></th>
+                    <td>
+                        <textarea id="hzb-extra" class="large-text code" rows="3" placeholder="<?php esc_attr_e('ex. Ton informal, adresare la persoana a II-a, include un exemplu practic în fiecare articol.', 'horoscop-zilnic'); ?>"></textarea>
+                        <p class="description"><?php esc_html_e('Se adaugă la promptul fiecărui articol din acest lot.', 'horoscop-zilnic'); ?></p>
+                    </td>
+                </tr>
+            </table>
+            <p>
+                <button type="button" class="button button-primary" id="hzb-enqueue" <?php disabled(!$has_ai_key); ?>><?php esc_html_e('Adaugă în coadă și pornește', 'horoscop-zilnic'); ?></button>
+                <span id="hzb-enqueue-status"></span>
+            </p>
+
+            <hr />
+
+            <h2><?php esc_html_e('Coada de procesare', 'horoscop-zilnic'); ?></h2>
+            <p>
+                <span id="hzb-progress" class="description"></span>
+            </p>
+            <p>
+                <button type="button" class="button" id="hzb-retry"><?php esc_html_e('Reîncearcă erorile', 'horoscop-zilnic'); ?></button>
+                <button type="button" class="button" id="hzb-clear"><?php esc_html_e('Golește coada', 'horoscop-zilnic'); ?></button>
+                <span class="description"><?php esc_html_e('Golirea coadei NU șterge articolele deja create.', 'horoscop-zilnic'); ?></span>
+            </p>
+            <table class="widefat striped" style="max-width:900px;">
+                <thead>
+                    <tr>
+                        <th><?php esc_html_e('Titlu', 'horoscop-zilnic'); ?></th>
+                        <th style="width:110px;"><?php esc_html_e('Stare', 'horoscop-zilnic'); ?></th>
+                        <th style="width:80px;"><?php esc_html_e('Cost', 'horoscop-zilnic'); ?></th>
+                        <th><?php esc_html_e('Detalii', 'horoscop-zilnic'); ?></th>
+                    </tr>
+                </thead>
+                <tbody id="hzb-queue">
+                    <tr><td colspan="4"><?php esc_html_e('Se încarcă…', 'horoscop-zilnic'); ?></td></tr>
+                </tbody>
+            </table>
+
+            <hr />
+
+            <h2><?php esc_html_e('Setări imagini & generare', 'horoscop-zilnic'); ?></h2>
+            <form method="post" action="options.php" style="max-width:720px;">
+                <?php settings_fields('hzb_settings'); ?>
+                <table class="form-table" role="presentation">
+                    <tr>
+                        <th scope="row"><label for="hzb_magnific_key"><?php esc_html_e('Cheie API Magnific', 'horoscop-zilnic'); ?></label></th>
+                        <td>
+                            <input type="password" name="hzb_magnific_key" id="hzb_magnific_key" class="regular-text" value="" autocomplete="new-password" placeholder="<?php echo esc_attr($has_mg_key ? __('•••••••• (cheie salvată — lasă gol ca să o păstrezi)', 'horoscop-zilnic') : ''); ?>" />
+                            <p class="description"><?php esc_html_e('Din contul Magnific → API Keys. Descărcările de stock nu consumă credite AI, dar au limită zilnică per cont.', 'horoscop-zilnic'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="hzb_images"><?php esc_html_e('Imagini per articol', 'horoscop-zilnic'); ?></label></th>
+                        <td>
+                            <?php $bi = (int) get_option('hzb_images', 2); ?>
+                            <select name="hzb_images" id="hzb_images">
+                                <option value="0" <?php selected(0, $bi); ?>><?php esc_html_e('Fără imagini', 'horoscop-zilnic'); ?></option>
+                                <option value="1" <?php selected(1, $bi); ?>><?php esc_html_e('1 (doar cover)', 'horoscop-zilnic'); ?></option>
+                                <option value="2" <?php selected(2, $bi); ?>><?php esc_html_e('2 (cover + 1 în articol)', 'horoscop-zilnic'); ?></option>
+                                <option value="3" <?php selected(3, $bi); ?>><?php esc_html_e('3 (cover + 2 în articol)', 'horoscop-zilnic'); ?></option>
+                            </select>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="hzb_image_size"><?php esc_html_e('Mărimea descărcată', 'horoscop-zilnic'); ?></label></th>
+                        <td>
+                            <?php $bs = (string) get_option('hzb_image_size', 'large'); ?>
+                            <select name="hzb_image_size" id="hzb_image_size">
+                                <option value="medium" <?php selected('medium', $bs); ?>><?php esc_html_e('Medie', 'horoscop-zilnic'); ?></option>
+                                <option value="large" <?php selected('large', $bs); ?>><?php esc_html_e('Mare (recomandat)', 'horoscop-zilnic'); ?></option>
+                                <option value="original" <?php selected('original', $bs); ?>><?php esc_html_e('Originală (fișiere mari)', 'horoscop-zilnic'); ?></option>
+                            </select>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="hzb_daily_limit"><?php esc_html_e('Limită descărcări/zi', 'horoscop-zilnic'); ?></label></th>
+                        <td>
+                            <input type="number" name="hzb_daily_limit" id="hzb_daily_limit" min="1" max="100" value="<?php echo esc_attr((int) get_option('hzb_daily_limit', 90)); ?>" />
+                            <p class="description"><?php esc_html_e('Contul Magnific permite ~100 descărcări de stock/zi. Dacă aceeași cheie e folosită pe mai multe site-uri, împarte limita între ele (ex. 2 site-uri = câte 45).', 'horoscop-zilnic'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="hzb_length"><?php esc_html_e('Lungime articol (cuvinte)', 'horoscop-zilnic'); ?></label></th>
+                        <td>
+                            <input type="number" name="hzb_length" id="hzb_length" min="300" max="3000" step="100" value="<?php echo esc_attr((int) get_option('hzb_length', 1000)); ?>" />
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="hzb_author"><?php esc_html_e('Publică drept', 'horoscop-zilnic'); ?></label></th>
+                        <td>
+                            <?php
+                            wp_dropdown_users(array(
+                                'name'              => 'hzb_author',
+                                'id'                => 'hzb_author',
+                                'selected'          => (int) get_option('hzb_author', 0),
+                                'who'               => 'authors',
+                                'include_selected'  => true,
+                                'show_option_none'  => __('— Administrator implicit —', 'horoscop-zilnic'),
+                                'option_none_value' => 0,
+                            ));
+                            ?>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><?php esc_html_e('Doar fotografii reale', 'horoscop-zilnic'); ?></th>
+                        <td>
+                            <input type="hidden" name="hzb_ai_excluded" value="0" />
+                            <label><input type="checkbox" name="hzb_ai_excluded" value="1" <?php checked(1, (int) get_option('hzb_ai_excluded', 1)); ?> /> <?php esc_html_e('Exclude imaginile generate cu AI din rezultatele de stock (recomandat)', 'horoscop-zilnic'); ?></label>
+                        </td>
+                    </tr>
+                </table>
+                <?php submit_button(__('Salvează setările', 'horoscop-zilnic')); ?>
+            </form>
         <?php
     }
 }

@@ -94,6 +94,94 @@
         });
     }
 
+    // ---- Articole Bulk: trimitere lot + poll pe coada de procesare ----
+    function initBulk() {
+        var $queue = $('#hzb-queue');
+        if (!$queue.length) { return; } // tab-ul nu e randat acum
+
+        var labels = {
+            pending: ['În coadă', '#996800'],
+            working: ['Se generează…', '#2271b1'],
+            done:    ['✓ Gata', '#00a32a'],
+            error:   ['✗ Eroare', '#b32d2e']
+        };
+
+        function esc(s) {
+            return String(s || '').replace(/[&<>"']/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+            });
+        }
+
+        function refresh() {
+            $.post(HZAdmin.ajaxUrl, { action: 'hzb_status', nonce: HZAdmin.nonce }).done(function (res) {
+                if (!res || !res.success) { return; }
+                var d = res.data, rows = '';
+                if (!d.items.length) {
+                    rows = '<tr><td colspan="4">Coada e goală. Adaugă un lot de titluri mai sus.</td></tr>';
+                }
+                d.items.forEach(function (it) {
+                    var st = labels[it.status] || [it.status, ''];
+                    var detail = '';
+                    if (it.status === 'error') { detail = esc(it.error); }
+                    else if (it.note) { detail = esc(it.note); }
+                    if (it.edit_link) {
+                        detail += (detail ? ' — ' : '') + '<a href="' + esc(it.edit_link) + '" target="_blank">Deschide</a>';
+                    }
+                    rows += '<tr><td>' + esc(it.title) + '</td>' +
+                        '<td style="color:' + st[1] + ';">' + st[0] + '</td>' +
+                        '<td>' + (it.cost ? '$' + Number(it.cost).toFixed(3) : '—') + '</td>' +
+                        '<td>' + detail + '</td></tr>';
+                });
+                $queue.html(rows);
+                var info = 'Descărcări Magnific azi: ' + d.downloads + '.';
+                if (d.pending > 0) { info += ' În lucru: ' + d.pending + ' articole.'; }
+                if (d.paused) { info += ' ⚠ ' + esc(d.paused); }
+                $('#hzb-progress').html(info);
+                // Poll des cât timp se lucrează, rar când e liniște.
+                clearTimeout(refresh.timer);
+                refresh.timer = setTimeout(refresh, d.pending > 0 ? 5000 : 30000);
+            });
+        }
+
+        $('#hzb-enqueue').on('click', function () {
+            var $btn = $(this), $st = $('#hzb-enqueue-status');
+            $st.css('color', '').text(' Se trimite…');
+            $btn.prop('disabled', true);
+            $.post(HZAdmin.ajaxUrl, {
+                action: 'hzb_enqueue',
+                nonce: HZAdmin.nonce,
+                titles: $('#hzb-titles').val(),
+                category: $('#hzb-category').val(),
+                status: $('#hzb-status').val(),
+                model: $('#hzb-model').val(),
+                extra: $('#hzb-extra').val()
+            }).done(function (res) {
+                if (res && res.success) {
+                    $st.css('color', '#00a32a').text(' ✓ ' + res.data.message);
+                    $('#hzb-titles').val('');
+                    refresh();
+                } else {
+                    $st.css('color', '#b32d2e').text(' ✗ ' + ((res && res.data && res.data.message) ? res.data.message : 'Eroare'));
+                }
+            }).fail(function () {
+                $st.css('color', '#b32d2e').text(' ✗ Eroare de rețea');
+            }).always(function () {
+                $btn.prop('disabled', false);
+            });
+        });
+
+        $('#hzb-retry').on('click', function () {
+            $.post(HZAdmin.ajaxUrl, { action: 'hzb_retry', nonce: HZAdmin.nonce }).done(refresh);
+        });
+
+        $('#hzb-clear').on('click', function () {
+            if (!window.confirm('Golești coada? Articolele deja create rămân neatinse.')) { return; }
+            $.post(HZAdmin.ajaxUrl, { action: 'hzb_clear', nonce: HZAdmin.nonce }).done(refresh);
+        });
+
+        refresh();
+    }
+
     $(function () {
         // Horoscop
         initImagePicker('hz', 'Alege imaginea de cover pentru horoscop');
@@ -101,5 +189,7 @@
         // Vreme
         initImagePicker('hzw', 'Alege imaginea de cover pentru vreme');
         initTestButton('hzw', 'hzw_test');
+        // Articole Bulk
+        initBulk();
     });
 })(jQuery);
