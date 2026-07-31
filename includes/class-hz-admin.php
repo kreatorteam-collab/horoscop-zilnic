@@ -49,6 +49,7 @@ class HZ_Admin {
             'hz_model'       => 'sanitize_text_field',
             'hz_category'    => 'sanitize_text_field',
             'hz_category_id' => 'absint',
+            'hz_author'      => 'absint',
             'hz_source_url'  => 'esc_url_raw',
             'hz_image'       => 'absint',
             'hz_title'         => 'hz_sanitize_prompt',
@@ -206,6 +207,23 @@ class HZ_Admin {
                             ));
                             ?>
                             <p class="description"><?php esc_html_e('Alege categoria existentă în care se publică articolele. Dacă nu alegi nimic, se folosește (și se creează la nevoie) categoria „Horoscop".', 'horoscop-zilnic'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="hz_author"><?php esc_html_e('Publică drept', 'horoscop-zilnic'); ?></label></th>
+                        <td>
+                            <?php
+                            wp_dropdown_users(array(
+                                'name'              => 'hz_author',
+                                'id'                => 'hz_author',
+                                'selected'          => (int) get_option('hz_author', 0),
+                                'who'               => 'authors',
+                                'include_selected'  => true,
+                                'show_option_none'  => __('— Administrator implicit —', 'horoscop-zilnic'),
+                                'option_none_value' => 0,
+                            ));
+                            ?>
+                            <p class="description"><?php esc_html_e('Utilizatorul afișat ca autor al articolelor de horoscop. „Administrator implicit" = primul administrator al site-ului.', 'horoscop-zilnic'); ?></p>
                         </td>
                     </tr>
                     <tr>

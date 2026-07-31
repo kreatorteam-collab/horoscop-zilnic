@@ -244,6 +244,12 @@ class HZ_Horoscope {
     }
 
     private function author_id() {
+        // Autorul ales explicit în setări (dacă e valid și poate publica).
+        $chosen = (int) get_option('hz_author', 0);
+        if ($chosen > 0 && user_can($chosen, 'publish_posts')) {
+            return $chosen;
+        }
+        // Rezervă: primul administrator.
         $admins = get_users(array('role' => 'administrator', 'number' => 1, 'orderby' => 'ID', 'order' => 'ASC', 'fields' => 'ID'));
         return !empty($admins) ? (int) $admins[0] : 0;
     }
