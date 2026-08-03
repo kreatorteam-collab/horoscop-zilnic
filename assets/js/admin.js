@@ -195,8 +195,9 @@
                 if (res && res.success) {
                     var d = res.data;
                     var col = d.remaining > 10 ? '#00a32a' : (d.remaining > 0 ? '#996800' : '#b32d2e');
-                    $res.css('color', col).text('Azi ai consumat ' + d.used + ' poze. Îți mai rămân ' +
-                        d.remaining + ' din ' + d.limit + '. Cota se resetează ' + d.reset + '.');
+                    var scope = d.scope ? ' <span style="font-weight:400;color:#666;">(' + d.scope + ')</span>' : '';
+                    $res.css('color', col).html('Azi ai consumat ' + d.used + ' poze. Îți mai rămân ' +
+                        d.remaining + ' din ' + d.limit + '. Cota se resetează ' + d.reset + '.' + scope);
                 } else {
                     $res.css('color', '#b32d2e').text(' ✗ ' + ((res && res.data && res.data.message) ? res.data.message : 'Eroare'));
                 }

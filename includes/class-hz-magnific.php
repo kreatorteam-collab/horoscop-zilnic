@@ -11,6 +11,8 @@ if (!defined('ABSPATH')) { exit; }
 class HZ_Magnific {
 
     const API_BASE = 'https://api.magnific.com';
+    // Contor CENTRAL agregat pe cheie (mai multe site-uri = aceeași cheie = un cont ~100/zi).
+    const QUOTA_URL = 'https://app.targetseo.ro/api/magnific-usage.php';
 
     /** Cheia API (stocată criptat, la fel ca și cheile AI). */
     public static function api_key() {
@@ -55,6 +57,8 @@ class HZ_Magnific {
             'date'  => gmdate('Y-m-d'),
             'count' => self::daily_limit(),
         ), 'no');
+        // Contul e epuizat pt TOATE site-urile cu aceeași cheie: oprește și central.
+        set_transient('hzb_central_dl', self::daily_limit(), 2 * MINUTE_IN_SECONDS);
     }
 
     /* ---- Limita zilnică de descărcări ----
@@ -76,7 +80,7 @@ class HZ_Magnific {
     }
 
     public static function limit_reached() {
-        return self::downloads_today() >= self::daily_limit();
+        return self::account_downloads_today() >= self::daily_limit();
     }
 
     private static function log_download() {
@@ -87,6 +91,59 @@ class HZ_Magnific {
         }
         $c['count']++;
         update_option('hzb_dl_day', $c, 'no');
+        // Raportează și în contorul central (agregat pe cheie, între site-uri).
+        self::central_report(1);
+    }
+
+    /* ---- Contor CENTRAL (agregat pe cheie, între toate site-urile) ----
+     * Trimitem DOAR un hash al cheii (capability), niciodată cheia reală. */
+
+    /** Amprenta cheii Magnific (SHA-256 cu sare), pentru agregare centrală. */
+    public static function key_hash() {
+        $key = self::api_key();
+        return $key === '' ? '' : hash('sha256', 'mgq1|' . $key);
+    }
+
+    /** Apel către contorul central. Întoarce array-ul răspuns sau null la orice eșec. */
+    private static function central_post($payload) {
+        $hash = self::key_hash();
+        if ($hash === '') { return null; }
+        $payload['k'] = $hash;
+        $resp = wp_remote_post(self::QUOTA_URL, array(
+            'timeout' => 6,
+            'headers' => array('Content-Type' => 'application/json'),
+            'body'    => wp_json_encode($payload),
+        ));
+        if (is_wp_error($resp) || wp_remote_retrieve_response_code($resp) !== 200) { return null; }
+        $j = json_decode((string) wp_remote_retrieve_body($resp), true);
+        return (is_array($j) && !empty($j['ok'])) ? $j : null;
+    }
+
+    /** Raportează n descărcări în contorul central (best-effort) și împrospătează cache-ul. */
+    public static function central_report($n = 1) {
+        $j = self::central_post(array('a' => 'hit', 'n' => (int) $n));
+        if ($j !== null && isset($j['count'])) {
+            set_transient('hzb_central_dl', (int) $j['count'], 2 * MINUTE_IN_SECONDS);
+        }
+    }
+
+    /** Total descărcări azi pe TOT contul (toate site-urile cu aceeași cheie). null = indisponibil. */
+    public static function central_today() {
+        $cached = get_transient('hzb_central_dl');
+        if ($cached !== false) { return (int) $cached; }
+        $j = self::central_post(array('a' => 'get'));
+        if ($j !== null && isset($j['count'])) {
+            $c = (int) $j['count'];
+            set_transient('hzb_central_dl', $c, 2 * MINUTE_IN_SECONDS);
+            return $c;
+        }
+        return null;
+    }
+
+    /** Consumul de azi relevant pentru limită: central dacă e disponibil, altfel local. */
+    public static function account_downloads_today() {
+        $c = self::central_today();
+        return $c === null ? self::downloads_today() : $c;
     }
 
     /** Timestamp-ul următorului reset de cotă: 00:10 UTC (marja de 10 min). */

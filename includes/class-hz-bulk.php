@@ -170,7 +170,7 @@ class HZ_Bulk {
         wp_send_json_success(array(
             'items'     => $items,
             'pending'   => $pending,
-            'downloads' => HZ_Magnific::downloads_today() . '/' . HZ_Magnific::daily_limit(),
+            'downloads' => HZ_Magnific::account_downloads_today() . '/' . HZ_Magnific::daily_limit(),
             'reset'     => wp_date('d.m H:i', HZ_Magnific::next_reset_ts()),
             'paused'    => (string) get_option('hzb_paused_reason', ''),
             'stopped'   => (int) get_option('hzb_stopped', 0),
@@ -183,13 +183,21 @@ class HZ_Bulk {
         if (!current_user_can('manage_options')) {
             wp_send_json_error(array('message' => 'Permisiune refuzată.'));
         }
-        $used  = HZ_Magnific::downloads_today();
-        $limit = HZ_Magnific::daily_limit();
+        $central = HZ_Magnific::central_today();
+        $limit   = HZ_Magnific::daily_limit();
+        if ($central !== null) {
+            $used  = $central;
+            $scope = 'pe tot contul (toate site-urile cu aceeași cheie)';
+        } else {
+            $used  = HZ_Magnific::downloads_today();
+            $scope = 'doar pe acest site (contorul central e momentan indisponibil)';
+        }
         wp_send_json_success(array(
             'used'      => $used,
             'limit'     => $limit,
             'remaining' => max(0, $limit - $used),
             'reset'     => wp_date('d.m H:i', HZ_Magnific::next_reset_ts()),
+            'scope'     => $scope,
         ));
     }
 
