@@ -20,6 +20,7 @@ class HZ_Bulk {
         add_action(self::HOOK, array($this, 'process_tick'));
         add_action('wp_ajax_hzb_enqueue', array($this, 'ajax_enqueue'));
         add_action('wp_ajax_hzb_status', array($this, 'ajax_status'));
+        add_action('wp_ajax_hzb_quota', array($this, 'ajax_quota'));
         add_action('wp_ajax_hzb_retry', array($this, 'ajax_retry'));
         add_action('wp_ajax_hzb_clear', array($this, 'ajax_clear'));
         add_action('wp_ajax_hzb_toggle', array($this, 'ajax_toggle'));
@@ -173,6 +174,22 @@ class HZ_Bulk {
             'reset'     => wp_date('d.m H:i', HZ_Magnific::next_reset_ts()),
             'paused'    => (string) get_option('hzb_paused_reason', ''),
             'stopped'   => (int) get_option('hzb_stopped', 0),
+        ));
+    }
+
+    /** Câte poze Magnific s-au consumat azi și câte au mai rămas (contor local). */
+    public function ajax_quota() {
+        check_ajax_referer('hz_admin_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('message' => 'Permisiune refuzată.'));
+        }
+        $used  = HZ_Magnific::downloads_today();
+        $limit = HZ_Magnific::daily_limit();
+        wp_send_json_success(array(
+            'used'      => $used,
+            'limit'     => $limit,
+            'remaining' => max(0, $limit - $used),
+            'reset'     => wp_date('d.m H:i', HZ_Magnific::next_reset_ts()),
         ));
     }
 

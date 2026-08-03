@@ -187,6 +187,26 @@
             $.post(HZAdmin.ajaxUrl, { action: 'hzb_clear', nonce: HZAdmin.nonce }).done(refresh);
         });
 
+        $('#hzb-quota').on('click', function () {
+            var $btn = $(this), $res = $('#hzb-quota-result');
+            $res.css('color', '').text(' Se verifică…');
+            $btn.prop('disabled', true);
+            $.post(HZAdmin.ajaxUrl, { action: 'hzb_quota', nonce: HZAdmin.nonce }).done(function (res) {
+                if (res && res.success) {
+                    var d = res.data;
+                    var col = d.remaining > 10 ? '#00a32a' : (d.remaining > 0 ? '#996800' : '#b32d2e');
+                    $res.css('color', col).text('Azi ai consumat ' + d.used + ' poze. Îți mai rămân ' +
+                        d.remaining + ' din ' + d.limit + '. Cota se resetează ' + d.reset + '.');
+                } else {
+                    $res.css('color', '#b32d2e').text(' ✗ ' + ((res && res.data && res.data.message) ? res.data.message : 'Eroare'));
+                }
+            }).fail(function () {
+                $res.css('color', '#b32d2e').text(' ✗ Eroare de rețea');
+            }).always(function () {
+                $btn.prop('disabled', false);
+            });
+        });
+
         refresh();
     }
 
