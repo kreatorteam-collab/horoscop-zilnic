@@ -406,13 +406,21 @@ class HZ_Bulk {
 
         // 3) Articolul.
         $status = in_array($item['st'], array('publish', 'draft', 'pending'), true) ? $item['st'] : 'draft';
-        $post_id = wp_insert_post(wp_slash(array(
+        $postarr = array(
             'post_title'    => wp_strip_all_tags($title),
             'post_content'  => $content,
             'post_status'   => $status,
             'post_author'   => $this->author_id(),
             'post_category' => array($this->category_id((int) $item['cat'])),
-        )), true);
+        );
+        // Dată random în luna curentă + luna trecută (backdatare, ca articolele bulk să
+        // nu aibă toate același timestamp). Opțional (hzb_random_date, implicit pornit).
+        $rand = $this->random_publish_date();
+        if ($rand) {
+            $postarr['post_date']     = $rand['local'];
+            $postarr['post_date_gmt'] = $rand['gmt'];
+        }
+        $post_id = wp_insert_post(wp_slash($postarr), true);
 
         if (is_wp_error($post_id)) {
             $item['s']    = 'error';
@@ -494,6 +502,30 @@ class HZ_Bulk {
         }
         $admins = get_users(array('role' => 'administrator', 'number' => 1, 'orderby' => 'ID', 'order' => 'ASC', 'fields' => 'ID'));
         return !empty($admins) ? (int) $admins[0] : 0;
+    }
+
+    /**
+     * Dată de publicare random în [prima zi a lunii TRECUTE 00:00 → ACUM], în fusul
+     * site-ului. Întoarce array('local','gmt') sau null dacă opțiunea e dezactivată.
+     * Toate datele sunt în trecut → articolele se publică imediat, dar backdatate.
+     */
+    private function random_publish_date() {
+        if (!(int) get_option('hzb_random_date', 1)) { return null; }
+        $tz = wp_timezone();
+        try {
+            $now   = new DateTimeImmutable('now', $tz);
+            $start = $now->modify('first day of last month')->setTime(0, 0, 0);
+        } catch (Exception $e) {
+            return null;
+        }
+        $a = $start->getTimestamp();
+        $b = $now->getTimestamp();
+        if ($b <= $a) { return null; }
+        $ts = wp_rand($a, $b);
+        return array(
+            'local' => (new DateTimeImmutable('@' . $ts))->setTimezone($tz)->format('Y-m-d H:i:s'),
+            'gmt'   => gmdate('Y-m-d H:i:s', $ts),
+        );
     }
 
     private function category_id($chosen) {

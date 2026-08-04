@@ -92,6 +92,7 @@ class HZ_Admin {
             'hzb_length'       => 'absint',
             'hzb_author'       => 'absint',
             'hzb_ai_excluded'  => 'absint',
+            'hzb_random_date'  => 'absint',
         );
         foreach ($bopts as $name => $cb) {
             register_setting('hzb_settings', $name, array('sanitize_callback' => $cb));
@@ -645,6 +646,14 @@ class HZ_Admin {
                         <td>
                             <input type="hidden" name="hzb_ai_excluded" value="0" />
                             <label><input type="checkbox" name="hzb_ai_excluded" value="1" <?php checked(1, (int) get_option('hzb_ai_excluded', 1)); ?> /> <?php esc_html_e('Exclude imaginile generate cu AI din rezultatele de stock (recomandat)', 'horoscop-zilnic'); ?></label>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><?php esc_html_e('Dată de publicare', 'horoscop-zilnic'); ?></th>
+                        <td>
+                            <input type="hidden" name="hzb_random_date" value="0" />
+                            <label><input type="checkbox" name="hzb_random_date" value="1" <?php checked(1, (int) get_option('hzb_random_date', 1)); ?> /> <?php esc_html_e('Dată random din luna curentă și luna trecută (backdatare, ca articolele să nu apară toate la aceeași dată)', 'horoscop-zilnic'); ?></label>
+                            <p class="description"><?php esc_html_e('Fiecare articol primește o dată aleatoare între 1 ale lunii trecute și acum, deci se publică imediat, dar cu dată variată. Nebifat = data curentă (ca până acum).', 'horoscop-zilnic'); ?></p>
                         </td>
                     </tr>
                 </table>
