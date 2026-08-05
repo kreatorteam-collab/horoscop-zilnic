@@ -24,6 +24,7 @@ class HZ_Bulk {
         add_action('wp_ajax_hzb_retry', array($this, 'ajax_retry'));
         add_action('wp_ajax_hzb_clear', array($this, 'ajax_clear'));
         add_action('wp_ajax_hzb_toggle', array($this, 'ajax_toggle'));
+        add_action('wp_ajax_hzb_backfill', array($this, 'ajax_backfill'));
     }
 
     /* ---- Coada (stocată în opțiune, fără autoload) ---- */
@@ -208,6 +209,92 @@ class HZ_Bulk {
         ));
     }
 
+    /**
+     * Completează pozele pe articolele deja generate care au rămas fără imagine
+     * (ex. cota Magnific s-a terminat în timpul lotului). NU regenerează textul și
+     * NU creează articole noi — doar caută imagini și le pune pe articolul existent.
+     * Lucrează în loturi mici, ca să nu depășească timpul unui request AJAX.
+     */
+    public function ajax_backfill() {
+        check_ajax_referer('hz_admin_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('message' => 'Permisiune refuzată.'));
+        }
+        if (!HZ_Magnific::has_key()) {
+            wp_send_json_error(array('message' => 'Pune întâi cheia API Magnific în setările de mai jos.'));
+        }
+        if (HZ_Magnific::limit_reached()) {
+            wp_send_json_error(array('message' => sprintf(
+                'Cota de descărcări Magnific e epuizată azi. Încearcă după %s.',
+                wp_date('d.m H:i', HZ_Magnific::next_reset_ts())
+            )));
+        }
+        if (function_exists('set_time_limit')) { @set_time_limit(300); }
+
+        $images = max(1, min(3, (int) get_option('hzb_images', 2)));
+        $batch  = 5; // per apas; userul mai apasă o dată pentru următorul lot
+        $q      = $this->queue();
+        $filled = 0;
+        $left   = 0;
+        $note   = '';
+
+        foreach ($q as $i => $item) {
+            if ($item['s'] !== 'done' || empty($item['post_id'])) { continue; }
+            $pid = (int) $item['post_id'];
+            if (!get_post($pid) || has_post_thumbnail($pid)) { continue; }
+
+            if ($filled >= $batch) { $left++; continue; }
+
+            $img = $this->fetch_images((string) $item['t'], (string) $item['model'], $images);
+            if (empty($img['ids'])) {
+                $note = $img['note'];
+                // Cotă terminată în timpul lotului: ne oprim, restul rămân pentru mâine.
+                if (stripos($note, 'epuizat') !== false || stripos($note, 'Limita') !== false) {
+                    $left++;
+                    break;
+                }
+                continue;
+            }
+
+            set_post_thumbnail($pid, $img['ids'][0]);
+            foreach ($img['ids'] as $att) {
+                wp_update_post(array('ID' => $att, 'post_parent' => $pid));
+            }
+            // Imaginile suplimentare intră în corpul articolului existent.
+            if (count($img['ids']) > 1) {
+                $post = get_post($pid);
+                if ($post instanceof WP_Post) {
+                    $content = $this->insert_images($post->post_content, array_slice($img['ids'], 1), (string) $item['t']);
+                    wp_update_post(array('ID' => $pid, 'post_content' => wp_slash($content)));
+                }
+            }
+            $q[$i]['note'] = count($img['ids']) . ' imagini (completate ulterior)';
+            $filled++;
+        }
+
+        $this->save_queue($q);
+        // Recalculăm câte au rămas fără poză, ca mesajul să fie exact.
+        $left = 0;
+        foreach ($this->queue() as $item) {
+            if ($item['s'] === 'done' && !empty($item['post_id'])
+                && get_post((int) $item['post_id']) && !has_post_thumbnail((int) $item['post_id'])) {
+                $left++;
+            }
+        }
+
+        if ($filled === 0 && $left === 0) {
+            wp_send_json_success(array('message' => 'Toate articolele din coadă au deja imagine.'));
+        }
+        $msg = sprintf('%d articole au primit imagini.', $filled);
+        if ($left > 0) {
+            $msg .= sprintf(' Au mai rămas %d fără poză — mai apasă o dată.', $left);
+        }
+        if ($filled === 0 && $note !== '') {
+            $msg = 'Nu s-a putut completa: ' . $note;
+        }
+        wp_send_json_success(array('message' => $msg));
+    }
+
     /** Oprește / repornește procesarea coadei (articolul în lucru se termină). */
     public function ajax_toggle() {
         check_ajax_referer('hz_admin_nonce', 'nonce');
@@ -369,42 +456,11 @@ class HZ_Bulk {
 
         // 2) Imaginile: interogare de căutare în engleză (stocul e indexat în
         // engleză), generată de model din titlu — apel minuscul, cost neglijabil.
-        $images    = max(0, min(3, (int) get_option('hzb_images', 2)));
-        $att_ids   = array();
-        $img_note  = '';
-        if ($images > 0 && !HZ_Magnific::has_key()) {
-            $img_note = 'cheia API Magnific nu e configurată în setările de mai jos';
-        }
-        if ($images > 0 && HZ_Magnific::has_key()) {
-            $qr = CW_API::generate($model, 'Translate this Romanian article title into a short English stock photo search query (3-5 generic, visual keywords). Reply with ONLY the keywords, nothing else: ' . $title, 100);
-            $query = is_wp_error($qr) ? '' : trim(preg_replace('/[^\p{L}\p{N} \-]/u', '', $qr['text']));
-            if (!is_wp_error($qr)) { $cost += (float) $qr['cost']; }
-            if ($query === '') { $query = $title; }
-
-            $found = HZ_Magnific::search($query, 12);
-            if (is_wp_error($found)) {
-                $img_note = $found->get_error_message();
-            } else {
-                $used = HZ_Magnific::used_ids();
-                foreach ($found as $r) {
-                    if (count($att_ids) >= $images) { break; }
-                    if (in_array($r['id'], $used, true)) { continue; }
-                    $att = HZ_Magnific::sideload($r['id'], 0, $title);
-                    if (is_wp_error($att)) {
-                        $img_note = $att->get_error_message();
-                        // Cota locală SAU cea a contului e goală: nu mai încercăm nimic azi
-                        // (tick-ul următor pune coada pe pauză până mâine).
-                        if (in_array($att->get_error_code(), array('hzb_limit', 'hzb_credits'), true)) { break; }
-                        continue; // o resursă coruptă nu oprește restul
-                    }
-                    HZ_Magnific::mark_used($r['id']);
-                    $att_ids[] = $att;
-                }
-                if (empty($att_ids) && $img_note === '') {
-                    $img_note = 'Nicio imagine de stock găsită pentru: ' . $query;
-                }
-            }
-        }
+        $images   = max(0, min(3, (int) get_option('hzb_images', 2)));
+        $img      = $this->fetch_images($title, $model, $images);
+        $att_ids  = $img['ids'];
+        $img_note = $img['note'];
+        $cost    += $img['cost'];
 
         // Imaginile suplimentare (după cover) intră în corp, distribuite după H2-uri.
         if (count($att_ids) > 1) {
@@ -454,6 +510,52 @@ class HZ_Bulk {
             $item['note'] = count($att_ids) . ' imagini' . ($img_note !== '' ? ' (' . $img_note . ')' : '');
         }
         return $item;
+    }
+
+    /**
+     * Caută pe Magnific și descarcă în Media până la $limit imagini pentru un titlu.
+     * Interogarea se traduce în engleză cu AI (stocul e indexat în engleză) — apel
+     * minuscul. Returnează array('ids', 'note', 'cost'); folosit și la generare, și
+     * la completarea ulterioară a articolelor rămase fără poză.
+     */
+    private function fetch_images($title, $model, $limit) {
+        $out = array('ids' => array(), 'note' => '', 'cost' => 0.0);
+        if ($limit < 1) { return $out; }
+        if (!HZ_Magnific::has_key()) {
+            $out['note'] = 'cheia API Magnific nu e configurată în setările de mai jos';
+            return $out;
+        }
+
+        $qr = CW_API::generate($model, 'Translate this Romanian article title into a short English stock photo search query (3-5 generic, visual keywords). Reply with ONLY the keywords, nothing else: ' . $title, 100);
+        $query = is_wp_error($qr) ? '' : trim(preg_replace('/[^\p{L}\p{N} \-]/u', '', $qr['text']));
+        if (!is_wp_error($qr)) { $out['cost'] += (float) $qr['cost']; }
+        if ($query === '') { $query = $title; }
+
+        $found = HZ_Magnific::search($query, 12);
+        if (is_wp_error($found)) {
+            $out['note'] = $found->get_error_message();
+            return $out;
+        }
+
+        $used = HZ_Magnific::used_ids();
+        foreach ($found as $r) {
+            if (count($out['ids']) >= $limit) { break; }
+            if (in_array($r['id'], $used, true)) { continue; }
+            $att = HZ_Magnific::sideload($r['id'], 0, $title);
+            if (is_wp_error($att)) {
+                $out['note'] = $att->get_error_message();
+                // Cota locală SAU cea a contului e goală: nu mai încercăm nimic azi
+                // (tick-ul următor pune coada pe pauză până mâine).
+                if (in_array($att->get_error_code(), array('hzb_limit', 'hzb_credits'), true)) { break; }
+                continue; // o resursă coruptă nu oprește restul
+            }
+            HZ_Magnific::mark_used($r['id']);
+            $out['ids'][] = $att;
+        }
+        if (empty($out['ids']) && $out['note'] === '') {
+            $out['note'] = 'Nicio imagine de stock găsită pentru: ' . $query;
+        }
+        return $out;
     }
 
     /** Inserează imaginile în corp: după al 2-lea, apoi al 4-lea subtitlu H2. */

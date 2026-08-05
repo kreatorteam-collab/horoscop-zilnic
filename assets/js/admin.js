@@ -180,8 +180,32 @@
             $.post(HZAdmin.ajaxUrl, { action: 'hzb_toggle', nonce: HZAdmin.nonce, stop: stopNow }).done(refresh);
         });
 
+        // Mesajul e important: fără el, un click pe „Reîncearcă erorile" când nu
+        // există erori pare că nu face nimic.
+        function actionWithFeedback(action, $btn, busyText) {
+            var $res = $('#hzb-action-result');
+            $res.css('color', '').text(' ' + busyText);
+            $btn.prop('disabled', true);
+            $.post(HZAdmin.ajaxUrl, { action: action, nonce: HZAdmin.nonce }).done(function (res) {
+                if (res && res.success) {
+                    $res.css('color', '#00a32a').text(' ✓ ' + (res.data.message || 'Gata.'));
+                } else {
+                    $res.css('color', '#b32d2e').text(' ✗ ' + ((res && res.data && res.data.message) ? res.data.message : 'Eroare'));
+                }
+                refresh();
+            }).fail(function () {
+                $res.css('color', '#b32d2e').text(' ✗ Eroare de rețea');
+            }).always(function () {
+                $btn.prop('disabled', false);
+            });
+        }
+
         $('#hzb-retry').on('click', function () {
-            $.post(HZAdmin.ajaxUrl, { action: 'hzb_retry', nonce: HZAdmin.nonce }).done(refresh);
+            actionWithFeedback('hzb_retry', $(this), 'Se verifică…');
+        });
+
+        $('#hzb-backfill').on('click', function () {
+            actionWithFeedback('hzb_backfill', $(this), 'Se caută imagini… (poate dura un minut)');
         });
 
         $('#hzb-clear').on('click', function () {

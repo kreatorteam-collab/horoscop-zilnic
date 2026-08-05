@@ -21,6 +21,17 @@ class HZ_Admin {
             if ($value === '') { return $old; }
             return CW_Crypto::encrypt($value);
         }, 10, 2);
+
+        // Cheie nouă = alt cont, altă cotă: ștergem contorul și blocajul de azi și
+        // repornim coada imediat (altfel ar aștepta degeaba până la resetul UTC).
+        add_action('update_option_hzb_magnific_key', function () {
+            HZ_Magnific::reset_daily_state();
+            delete_option('hzb_paused_reason');
+            wp_clear_scheduled_hook(HZ_Bulk::HOOK);
+            if (!(int) get_option('hzb_stopped', 0)) {
+                wp_schedule_single_event(time() + 5, HZ_Bulk::HOOK);
+            }
+        }, 10, 0);
     }
 
     /** Vechiul link Setări → Horoscop Zilnic redirecționează la tab-ul din pagina unică. */
@@ -552,8 +563,15 @@ class HZ_Admin {
             <p>
                 <button type="button" class="button button-primary" id="hzb-toggle" data-stopped="<?php echo (int) get_option('hzb_stopped', 0); ?>"><?php echo (int) get_option('hzb_stopped', 0) ? esc_html__('Repornește procesarea', 'horoscop-zilnic') : esc_html__('Oprește procesarea', 'horoscop-zilnic'); ?></button>
                 <button type="button" class="button" id="hzb-retry"><?php esc_html_e('Reîncearcă erorile', 'horoscop-zilnic'); ?></button>
+                <button type="button" class="button" id="hzb-backfill"><?php esc_html_e('Completează pozele lipsă', 'horoscop-zilnic'); ?></button>
                 <button type="button" class="button" id="hzb-clear"><?php esc_html_e('Golește coada', 'horoscop-zilnic'); ?></button>
                 <span class="description"><?php esc_html_e('Oprirea lasă articolul în lucru să se termine; golirea coadei NU șterge articolele deja create.', 'horoscop-zilnic'); ?></span>
+            </p>
+            <p>
+                <span id="hzb-action-result" style="font-weight:600;"></span>
+            </p>
+            <p class="description" style="max-width:900px;">
+                <?php esc_html_e('„Reîncearcă erorile" repune în coadă doar articolele cu stare Eroare (cele fără poză sunt Gata, nu erori). „Completează pozele lipsă" caută imagini pentru articolele deja scrise care au rămas fără cover — fără să le regenereze textul și fără articole noi.', 'horoscop-zilnic'); ?>
             </p>
             <table class="widefat striped" style="max-width:900px;">
                 <thead>

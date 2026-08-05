@@ -59,15 +59,43 @@ class HZ_Magnific {
      * De aceea refuzul se memorează ca STARE persistentă pe ziua UTC și bate contoarele.
      */
     public static function mark_exhausted() {
-        update_option('hzb_exhausted_day', gmdate('Y-m-d'), 'no');
+        // Starea se leagă de CHEIE, nu doar de zi: dacă userul pune altă cheie API
+        // (alt cont, altă cotă), blocarea de azi nu mai are ce căuta.
+        update_option('hzb_exhausted_day', array(
+            'date' => gmdate('Y-m-d'),
+            'k'    => self::key_fp(),
+        ), 'no');
         delete_transient('hzb_central_ex');
         // Contul e epuizat pt TOATE site-urile cu aceeași cheie: anunță și central.
         self::central_post(array('a' => 'exhaust'));
     }
 
+    /** Amprentă scurtă a cheii curente, ca să legăm contoarele de cheia care le-a produs. */
+    private static function key_fp() {
+        $h = self::key_hash();
+        return $h === '' ? '' : substr($h, 0, 16);
+    }
+
+    /**
+     * Șterge starea zilei (contor + blocaj) — se apelează la schimbarea cheii API:
+     * cheia nouă are cota ei, nu moștenește blocajul celei vechi.
+     */
+    public static function reset_daily_state() {
+        delete_option('hzb_exhausted_day');
+        delete_option('hzb_dl_day');
+        delete_transient('hzb_central_dl');
+        delete_transient('hzb_central_ex');
+    }
+
     /** True dacă azi (zi UTC) contul a refuzat deja descărcările — local sau raportat central. */
     public static function is_exhausted() {
-        if ((string) get_option('hzb_exhausted_day', '') === gmdate('Y-m-d')) {
+        $ex = get_option('hzb_exhausted_day', '');
+        // Format vechi (string cu data) sau nou (array cu data + amprenta cheii).
+        if (is_array($ex)) {
+            if (isset($ex['date'], $ex['k']) && $ex['date'] === gmdate('Y-m-d') && $ex['k'] === self::key_fp()) {
+                return true;
+            }
+        } elseif ((string) $ex === gmdate('Y-m-d')) {
             return true;
         }
         $cached = get_transient('hzb_central_ex');
@@ -92,6 +120,10 @@ class HZ_Magnific {
         if (!is_array($c) || !isset($c['date']) || $c['date'] !== gmdate('Y-m-d')) {
             return 0;
         }
+        // Contorul aparține cheii care l-a produs; la cheie nouă pornim de la zero.
+        if (isset($c['k']) && $c['k'] !== self::key_fp()) {
+            return 0;
+        }
         return (int) $c['count'];
     }
 
@@ -107,10 +139,13 @@ class HZ_Magnific {
 
     private static function log_download() {
         $today = gmdate('Y-m-d');
+        $fp    = self::key_fp();
         $c = get_option('hzb_dl_day', array());
-        if (!is_array($c) || !isset($c['date']) || $c['date'] !== $today) {
+        if (!is_array($c) || !isset($c['date']) || $c['date'] !== $today
+            || (isset($c['k']) && $c['k'] !== $fp)) {
             $c = array('date' => $today, 'count' => 0);
         }
+        $c['k'] = $fp;
         $c['count']++;
         update_option('hzb_dl_day', $c, 'no');
         // Raportează și în contorul central (agregat pe cheie, între site-uri).
@@ -262,7 +297,9 @@ class HZ_Magnific {
             // azi (contorul local nu vede alte site-uri care folosesc aceeași cheie).
             if (stripos($msg, 'insufficient credits') !== false) {
                 self::mark_exhausted();
-                return new WP_Error('hzb_credits', 'Cota de descărcări de stock a contului Magnific e epuizată azi.');
+                // Limita de ~100/zi e pe CONT, nu pe cheie: chei noi generate în
+                // același cont trag din aceeași cotă și vor primi același refuz.
+                return new WP_Error('hzb_credits', 'Cota de descărcări de stock a contului Magnific e epuizată azi (limita e pe CONT, nu pe cheie - o cheie nouă din același cont nu adaugă cotă).');
             }
             return new WP_Error('hzb_api', 'Magnific: descărcarea a eșuat (' . $msg . ').');
         }
