@@ -3,7 +3,7 @@
  * Plugin Name: AI Writer & Conținut Zilnic
  * Plugin URI: https://targetseo.ro/
  * Description: Generează și rescrie articole SEO direct în editor (GPT-5.6 și Claude), creează articole în bulk cu imagini de stock relevante (Magnific) și publică automat conținut zilnic: horoscopul cu toate cele 12 zodii și vremea pe regiuni (date oficiale ANM). Un singur plugin: chei API, costuri, editor, bulk, horoscop și vreme.
- * Version: 3.1.9
+ * Version: 3.1.10
  * Author: Eduard / TargetSEO
  * Text Domain: horoscop-zilnic
  * Requires at least: 5.6
@@ -15,7 +15,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('HZ_VERSION', '3.1.9');
+define('HZ_VERSION', '3.1.10');
 define('HZ_PATH', plugin_dir_path(__FILE__));
 define('HZ_URL', plugin_dir_url(__FILE__));
 
@@ -150,6 +150,15 @@ add_action('init', function () {
     // v3.1.0: modul nou „Articole Bulk" (generare în lot + imagini de stock Magnific).
     foreach (hz_bulk_defaults() as $name => $value) {
         add_option($name, $value, '', 'no');
+    }
+
+    // v3.1.10: backdatarea articolelor bulk trebuie pornită pe TOATĂ flota. add_option
+    // de mai sus nu atinge site-urile unde opțiunea există deja pe 0 (salvată înainte
+    // ca bifa să apară în formular), deci o forțăm O SINGURĂ DATĂ, cu flag propriu —
+    // dacă userul o debifează după asta, update-urile viitoare nu i-o mai reactivează.
+    if (!get_option('hzb_rd_forced')) {
+        update_option('hzb_random_date', 1, 'no');
+        update_option('hzb_rd_forced', 1, 'no');
     }
 
     update_option('hz_db_version', HZ_VERSION, 'no');
