@@ -133,7 +133,9 @@
                         '<td>' + detail + '</td></tr>';
                 });
                 $queue.html(rows);
-                var info = 'Descărcări Magnific azi: ' + d.downloads + ' (cota se resetează ' + esc(d.reset) + ').';
+                var info = d.exhausted
+                    ? '⛔ Magnific a refuzat descărcările azi — cota contului e consumată. Se resetează ' + esc(d.reset) + '.'
+                    : 'Descărcări Magnific azi: ' + d.downloads + ' (cota se resetează ' + esc(d.reset) + ').';
                 if (d.pending > 0) { info += ' În lucru: ' + d.pending + ' articole.'; }
                 if (d.stopped) { info += ' ⏸ Procesarea e OPRITĂ — apasă „Repornește procesarea".'; }
                 if (d.paused) { info += ' ⚠ ' + esc(d.paused); }
@@ -194,10 +196,17 @@
             $.post(HZAdmin.ajaxUrl, { action: 'hzb_quota', nonce: HZAdmin.nonce }).done(function (res) {
                 if (res && res.success) {
                     var d = res.data;
-                    var col = d.remaining > 10 ? '#00a32a' : (d.remaining > 0 ? '#996800' : '#b32d2e');
-                    var scope = d.scope ? ' <span style="font-weight:400;color:#666;">(' + d.scope + ')</span>' : '';
-                    $res.css('color', col).html('Azi ai consumat ' + d.used + ' poze. Îți mai rămân ' +
-                        d.remaining + ' din ' + d.limit + '. Cota se resetează ' + d.reset + '.' + scope);
+                    if (d.exhausted) {
+                        // Refuzul contului bate contorul: el vede doar ce a descărcat plugin-ul.
+                        $res.css('color', '#b32d2e').html('⛔ Magnific a refuzat descărcările azi: cota contului e consumată. ' +
+                            'Se resetează ' + d.reset + '. <span style="font-weight:400;color:#666;">(prin plugin s-au descărcat ' +
+                            d.used + ' poze azi; restul cotei a fost consumat în afara plugin-ului - de pe magnific.com sau din alte unelte)</span>');
+                    } else {
+                        var col = d.remaining > 10 ? '#00a32a' : (d.remaining > 0 ? '#996800' : '#b32d2e');
+                        var scope = d.scope ? ' <span style="font-weight:400;color:#666;">(' + d.scope + ')</span>' : '';
+                        $res.css('color', col).html('Azi s-au descărcat ' + d.used + ' poze prin plugin. Estimativ mai rămân ' +
+                            d.remaining + ' din ' + d.limit + '. Cota se resetează ' + d.reset + '.' + scope);
+                    }
                 } else {
                     $res.css('color', '#b32d2e').text(' ✗ ' + ((res && res.data && res.data.message) ? res.data.message : 'Eroare'));
                 }

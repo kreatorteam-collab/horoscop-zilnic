@@ -167,10 +167,14 @@ class HZ_Bulk {
                 'edit_link' => $item['post_id'] ? get_edit_post_link((int) $item['post_id'], 'raw') : '',
             );
         }
+        $exhausted = HZ_Magnific::has_key() ? HZ_Magnific::is_exhausted() : false;
         wp_send_json_success(array(
             'items'     => $items,
             'pending'   => $pending,
-            'downloads' => HZ_Magnific::account_downloads_today() . '/' . HZ_Magnific::daily_limit(),
+            'downloads' => $exhausted
+                ? 'cotă epuizată'
+                : (HZ_Magnific::account_downloads_today() . '/' . HZ_Magnific::daily_limit()),
+            'exhausted' => $exhausted ? 1 : 0,
             'reset'     => wp_date('d.m H:i', HZ_Magnific::next_reset_ts()),
             'paused'    => (string) get_option('hzb_paused_reason', ''),
             'stopped'   => (int) get_option('hzb_stopped', 0),
@@ -187,15 +191,18 @@ class HZ_Bulk {
         $limit   = HZ_Magnific::daily_limit();
         if ($central !== null) {
             $used  = $central;
-            $scope = 'pe tot contul (toate site-urile cu aceeași cheie)';
+            $scope = 'descărcate prin plugin, pe toate site-urile cu aceeași cheie';
         } else {
             $used  = HZ_Magnific::downloads_today();
             $scope = 'doar pe acest site (contorul central e momentan indisponibil)';
         }
+        // Dacă Magnific a refuzat deja azi, contorul nostru e irelevant: cota reală a
+        // contului include și descărcări făcute în afara plugin-ului.
         wp_send_json_success(array(
             'used'      => $used,
             'limit'     => $limit,
             'remaining' => max(0, $limit - $used),
+            'exhausted' => HZ_Magnific::is_exhausted() ? 1 : 0,
             'reset'     => wp_date('d.m H:i', HZ_Magnific::next_reset_ts()),
             'scope'     => $scope,
         ));

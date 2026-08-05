@@ -51,14 +51,35 @@ class HZ_Magnific {
         return $response;
     }
 
-    /** Marchează cota de azi drept consumată (contul a refuzat descărcarea). */
+    /**
+     * Magnific a refuzat descărcarea („Insufficient credits") = cota REALĂ a contului
+     * pe ziua UTC curentă s-a terminat. Contoarele noastre (local/central) văd doar
+     * descărcările făcute prin plugin, deci pot arăta mult mai puțin decât consumul
+     * real (descărcări de pe magnific.com, alte unelte, rulări dinainte de contor).
+     * De aceea refuzul se memorează ca STARE persistentă pe ziua UTC și bate contoarele.
+     */
     public static function mark_exhausted() {
-        update_option('hzb_dl_day', array(
-            'date'  => gmdate('Y-m-d'),
-            'count' => self::daily_limit(),
-        ), 'no');
-        // Contul e epuizat pt TOATE site-urile cu aceeași cheie: oprește și central.
-        set_transient('hzb_central_dl', self::daily_limit(), 2 * MINUTE_IN_SECONDS);
+        update_option('hzb_exhausted_day', gmdate('Y-m-d'), 'no');
+        delete_transient('hzb_central_ex');
+        // Contul e epuizat pt TOATE site-urile cu aceeași cheie: anunță și central.
+        self::central_post(array('a' => 'exhaust'));
+    }
+
+    /** True dacă azi (zi UTC) contul a refuzat deja descărcările — local sau raportat central. */
+    public static function is_exhausted() {
+        if ((string) get_option('hzb_exhausted_day', '') === gmdate('Y-m-d')) {
+            return true;
+        }
+        $cached = get_transient('hzb_central_ex');
+        if ($cached !== false) { return (int) $cached === 1; }
+        $j = self::central_post(array('a' => 'get'));
+        if ($j !== null && isset($j['exhausted'])) {
+            $ex = (int) $j['exhausted'] === 1 ? 1 : 0;
+            set_transient('hzb_central_ex', $ex, 2 * MINUTE_IN_SECONDS);
+            if (isset($j['count'])) { set_transient('hzb_central_dl', (int) $j['count'], 2 * MINUTE_IN_SECONDS); }
+            return $ex === 1;
+        }
+        return false;
     }
 
     /* ---- Limita zilnică de descărcări ----
@@ -80,7 +101,8 @@ class HZ_Magnific {
     }
 
     public static function limit_reached() {
-        return self::account_downloads_today() >= self::daily_limit();
+        // Refuzul contului e adevărul de teren; contoarele sunt doar o estimare.
+        return self::is_exhausted() || self::account_downloads_today() >= self::daily_limit();
     }
 
     private static function log_download() {

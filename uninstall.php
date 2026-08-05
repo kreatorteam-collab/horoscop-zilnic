@@ -12,7 +12,7 @@ $options = array(
     // Modul Articole Bulk (v3.1.0) — opțiunile hzb_*:
     'hzb_magnific_key', 'hzb_images', 'hzb_image_size', 'hzb_daily_limit', 'hzb_length',
     'hzb_author', 'hzb_ai_excluded', 'hzb_random_date', 'hzb_queue', 'hzb_used_ids', 'hzb_dl_day', 'hzb_paused_reason',
-    'hzb_stopped', 'hzb_gap',
+    'hzb_stopped', 'hzb_gap', 'hzb_exhausted_day',
     // Modulul AI Writer inclus (fost plugin claude-writer) — opțiunile cw_*:
     'cw_api_key', 'cw_openai_api_key', 'cw_model_default_gpt56', 'cw_model_default_sonnet',
     'cw_default_model', 'cw_effort', 'cw_temperature', 'cw_max_tokens', 'cw_stream_enabled',
@@ -29,6 +29,8 @@ delete_transient('hz_horo_lock');
 delete_transient('hz_weather_lock');
 delete_transient('hz_weather_anm_xml');
 delete_transient('hz_bulk_lock');
+delete_transient('hzb_central_dl');
+delete_transient('hzb_central_ex');
 wp_clear_scheduled_hook('hz_horoscope_daily');
 wp_clear_scheduled_hook('hz_weather_daily');
 wp_clear_scheduled_hook('hz_bulk_process');
