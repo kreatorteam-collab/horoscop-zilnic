@@ -155,10 +155,13 @@ class HZ_Refresh {
                        'adult', 'erotic', 'xxx', '18+',
                        'gambling', 'pariuri', 'cazino', 'casino', 'betting', 'noroc',
                        'poker', 'ruleta', 'loto', 'slot'),
+            // v3 (3.4.1): „Știrea zilei" NU e prins de tiparul `stiri` (stirea ≠ stiri).
+            // `stire` acoperă Știre / Știrea / Știrile; restul sunt variante de breaking news.
+            3 => array('stire', 'ultima ora', 'ultima-ora', 'breaking'),
         );
     }
 
-    const SEED_V = 2;
+    const SEED_V = 3;
 
     /**
      * Categoriile excluse OBLIGATORIU. Se auto-detectează la prima rulare și se
