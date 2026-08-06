@@ -158,10 +158,13 @@ class HZ_Refresh {
             // v3 (3.4.1): „Știrea zilei" NU e prins de tiparul `stiri` (stirea ≠ stiri).
             // `stire` acoperă Știre / Știrea / Știrile; restul sunt variante de breaking news.
             3 => array('stire', 'ultima ora', 'ultima-ora', 'breaking'),
+            // v4 (3.4.2): showbiz. Sportul NU se exclude (decizia userului) — categoriile
+            // de sport rămân în procesare.
+            4 => array('showbiz'),
         );
     }
 
-    const SEED_V = 3;
+    const SEED_V = 4;
 
     /**
      * Categoriile excluse OBLIGATORIU. Se auto-detectează la prima rulare și se
