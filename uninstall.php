@@ -18,7 +18,7 @@ $options = array(
     // siguranță a articolelor deja modificate.
     'hzr_enabled', 'hzr_model', 'hzr_daily_limit', 'hzr_gap', 'hzr_do_faq', 'hzr_do_takeaways',
     'hzr_faq_count', 'hzr_tk_count', 'hzr_tk_pos', 'hzr_min_words', 'hzr_order', 'hzr_max_chars',
-    'hzr_excluded_cats', 'hzr_cats_seeded', 'hzr_stopped', 'hzr_prompt', 'hzr_system_prompt',
+    'hzr_excluded_cats', 'hzr_cats_seeded', 'hzr_cats_seed_v', 'hzr_stopped', 'hzr_prompt', 'hzr_system_prompt',
     'hzr_do_meta', 'hzr_meta_overwrite', 'hzr_do_title', 'hzr_title_max_len', 'hzr_faq_heading', 'hzr_tk_heading',
     'hzr_day', 'hzr_stats', 'hzr_idle', 'hzr_last_error',
     // Modulul AI Writer inclus (fost plugin claude-writer) — opțiunile cw_*:

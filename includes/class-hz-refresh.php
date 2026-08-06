@@ -139,16 +139,44 @@ class HZ_Refresh {
     }
 
     /**
-     * Categoriile excluse OBLIGATORIU: advertoriale + știri/actualitate/politică/economie.
-     * Se auto-detectează o singură dată (userul poate ajusta lista din setări).
+     * Tiparele de nume/slug pentru categoriile excluse, pe VERSIUNI. La un update care
+     * adaugă tipare noi se aplică DOAR setul nou peste lista existentă (union), ca
+     * bifele puse sau scoase manual de user să nu fie rescrise.
+     */
+    public static function pattern_sets() {
+        return array(
+            // v1 (3.2.0): advertoriale + știri
+            1 => array('sponsoriz', 'advertor', 'publicit', 'promovate', 'promoted',
+                       'actualitate', 'stiri', 'news', 'politic', 'economie', 'economic', 'extern'),
+            // v2 (3.4.0): conținut legat de o dată anume, comunicate, adult, jocuri de noroc
+            2 => array('horoscop', 'astrolog', 'zodiac', 'zodii',
+                       'vreme', 'meteo', 'prognoza',
+                       'comunicat',
+                       'adult', 'erotic', 'xxx', '18+',
+                       'gambling', 'pariuri', 'cazino', 'casino', 'betting', 'noroc',
+                       'poker', 'ruleta', 'loto', 'slot'),
+        );
+    }
+
+    const SEED_V = 2;
+
+    /**
+     * Categoriile excluse OBLIGATORIU. Se auto-detectează la prima rulare și se
+     * COMPLETEAZĂ la fiecare set nou de tipare (userul poate ajusta lista din setări).
      */
     public function seed_excluded_cats() {
-        if ((int) get_option('hzr_cats_seeded', 0)) { return; }
-        $patterns = array(
-            'sponsoriz', 'advertor', 'publicit', 'promovate', 'promoted',
-            'actualitate', 'stiri', 'news', 'politic', 'economie', 'economic', 'extern',
-        );
-        $ids = array();
+        $sets = self::pattern_sets();
+        // Site-urile seedate înainte de versionare (opțiunea veche hzr_cats_seeded) = v1.
+        $have = (int) get_option('hzr_cats_seed_v', ((int) get_option('hzr_cats_seeded', 0)) ? 1 : 0);
+        if ($have >= self::SEED_V) { return; }
+
+        $patterns = array();
+        for ($v = $have + 1; $v <= self::SEED_V; $v++) {
+            if (isset($sets[$v])) { $patterns = array_merge($patterns, $sets[$v]); }
+        }
+        if (!$patterns) { update_option('hzr_cats_seed_v', self::SEED_V, 'no'); return; }
+
+        $ids = array_filter(array_map('absint', explode(',', (string) get_option('hzr_excluded_cats', ''))));
         $terms = get_terms(array('taxonomy' => 'category', 'hide_empty' => false));
         if (is_array($terms)) {
             foreach ($terms as $t) {
@@ -161,6 +189,7 @@ class HZ_Refresh {
         }
         update_option('hzr_excluded_cats', implode(',', array_unique($ids)), 'no');
         update_option('hzr_cats_seeded', 1, 'no');
+        update_option('hzr_cats_seed_v', self::SEED_V, 'no');
     }
 
     /** ID-urile excluse, cu tot cu subcategoriile lor. */
@@ -221,6 +250,8 @@ class HZ_Refresh {
         // dată anume — un FAQ pe „Horoscop joi, 6 august" nu are nicio valoare.
         if (get_post_meta($post->ID, '_hz_horoscope', true)) { return 'horoscop zilnic'; }
         if (get_post_meta($post->ID, '_hz_weather', true))   { return 'vremea zilnică'; }
+        // Articolele marcate 18+ în editor (age-gate-ul temei) — indiferent de categorie.
+        if (get_post_meta($post->ID, '_magpress_adult', true)) { return 'conținut 18+'; }
 
         $c = (string) $post->post_content;
         if ($this->has_external_link($c))                { return 'link extern'; }
@@ -825,7 +856,7 @@ class HZ_Refresh {
         )));
     }
 
-    private function restore($post_id) {
+    public function restore($post_id) {
         $backup = get_post_meta($post_id, self::META_BACKUP, true);
         if ($backup === '' || $backup === false) { return false; }
 
