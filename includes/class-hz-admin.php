@@ -93,6 +93,34 @@ class HZ_Admin {
             register_setting('hzw_settings', $name, array('sanitize_callback' => $cb));
         }
 
+        // Modul Refresh conținut (v3.2.0) — grup de setări separat.
+        $ropts = array(
+            'hzr_enabled'       => 'absint',
+            'hzr_model'         => 'sanitize_text_field',
+            'hzr_daily_limit'   => 'absint',
+            'hzr_gap'           => 'absint',
+            'hzr_do_faq'        => 'absint',
+            'hzr_do_takeaways'  => 'absint',
+            'hzr_do_meta'       => 'absint',
+            'hzr_meta_overwrite' => 'absint',
+            'hzr_do_title'      => 'absint',
+            'hzr_title_max_len' => 'absint',
+            'hzr_faq_count'     => 'absint',
+            'hzr_tk_count'      => 'absint',
+            'hzr_faq_heading'   => 'sanitize_text_field',
+            'hzr_tk_heading'    => 'sanitize_text_field',
+            'hzr_tk_pos'        => 'sanitize_text_field',
+            'hzr_min_words'     => 'absint',
+            'hzr_order'         => 'sanitize_text_field',
+            'hzr_max_chars'     => 'absint',
+            'hzr_excluded_cats' => 'hz_sanitize_cat_csv',
+            'hzr_prompt'        => 'hz_sanitize_prompt',
+            'hzr_system_prompt' => 'hz_sanitize_prompt',
+        );
+        foreach ($ropts as $name => $cb) {
+            register_setting('hzr_settings', $name, array('sanitize_callback' => $cb));
+        }
+
         // Modul Articole Bulk (v3.1.0) — grup de setări separat.
         $bopts = array(
             'hzb_magnific_key' => 'sanitize_text_field',
@@ -678,6 +706,225 @@ class HZ_Admin {
                 <?php submit_button(__('Salvează setările', 'horoscop-zilnic')); ?>
             </form>
         <?php
+    }
+
+    /** Conținutul tab-ului „Refresh conținut" din pagina unică de setări. */
+    public function render_refresh_tab() {
+        if (!current_user_can('manage_options')) { return; }
+
+        $has_ai_key = CW_API::has_key();
+        $models     = CW_Models::all();
+        $refresh    = new HZ_Refresh();
+        $refresh->seed_excluded_cats(); // prima vizită: bifează singur advertorialele + știrile
+        $excluded   = array_filter(array_map('absint', explode(',', (string) get_option('hzr_excluded_cats', ''))));
+        $cats       = get_terms(array('taxonomy' => 'category', 'hide_empty' => false, 'orderby' => 'name'));
+        if (!is_array($cats)) { $cats = array(); }
+        ?>
+            <?php if (!$has_ai_key) : ?>
+                <div class="notice notice-warning"><p><?php esc_html_e('Configurează întâi cheia API (OpenAI sau Anthropic) în tab-ul AI Writer.', 'horoscop-zilnic'); ?></p></div>
+            <?php endif; ?>
+
+            <p style="max-width:760px;">
+                <?php esc_html_e('Îmbogățește articolele DEJA publicate cu două blocuri derivate strict din textul lor: „Ce trebuie să reții" la început și „Întrebări frecvente" la final (tema emite automat schema FAQPage pentru ele). Data articolului se actualizează pentru că se schimbă conținutul cu adevărat - nu e un „touch" gol pe dată.', 'horoscop-zilnic'); ?>
+            </p>
+            <p style="max-width:760px;" class="description">
+                <?php esc_html_e('Excluderi automate: categoriile de advertoriale și de știri (bifate mai jos), articolele care conțin un link către alt domeniu (advertorialele plătite), cele care au deja o secțiune de întrebări frecvente și cele prea scurte. Conținutul original se salvează înainte de modificare - orice articol poate fi pus la loc.', 'horoscop-zilnic'); ?>
+            </p>
+
+            <h2><?php esc_html_e('Stare', 'horoscop-zilnic'); ?></h2>
+            <p><span id="hzr-progress" class="description"><?php esc_html_e('Se încarcă…', 'horoscop-zilnic'); ?></span></p>
+            <table class="widefat striped" style="max-width:560px;margin-bottom:14px;">
+                <tbody>
+                    <tr><td><?php esc_html_e('Articole publicate', 'horoscop-zilnic'); ?></td><td id="hzr-c-total" style="text-align:right;font-weight:600;">-</td></tr>
+                    <tr><td><?php esc_html_e('În categorii excluse', 'horoscop-zilnic'); ?></td><td id="hzr-c-cats" style="text-align:right;">-</td></tr>
+                    <tr><td><?php esc_html_e('Sărite (link extern, FAQ existent, prea scurte)', 'horoscop-zilnic'); ?></td><td id="hzr-c-skip" style="text-align:right;">-</td></tr>
+                    <tr><td><?php esc_html_e('Procesate', 'horoscop-zilnic'); ?></td><td id="hzr-c-done" style="text-align:right;">-</td></tr>
+                    <tr><td><strong><?php esc_html_e('Rămase eligibile (estimat)', 'horoscop-zilnic'); ?></strong></td><td id="hzr-c-elig" style="text-align:right;font-weight:600;">-</td></tr>
+                </tbody>
+            </table>
+            <p class="description" style="max-width:760px;">
+                <?php esc_html_e('„Estimat" pentru că linkurile externe se verifică la procesare: articolele cu link extern trec în rândul „Sărite" pe măsură ce sunt evaluate.', 'horoscop-zilnic'); ?>
+            </p>
+
+            <p>
+                <button type="button" class="button button-primary" id="hzr-toggle" data-stopped="<?php echo (int) get_option('hzr_stopped', 0); ?>"><?php echo (int) get_option('hzr_stopped', 0) ? esc_html__('Repornește procesarea', 'horoscop-zilnic') : esc_html__('Oprește procesarea', 'horoscop-zilnic'); ?></button>
+                <button type="button" class="button" id="hzr-test" <?php disabled(!$has_ai_key); ?>><?php esc_html_e('Testează pe un articol', 'horoscop-zilnic'); ?></button>
+                <input type="number" id="hzr-test-id" class="small-text" placeholder="ID" title="<?php esc_attr_e('ID de articol (opțional) - gol = următorul eligibil', 'horoscop-zilnic'); ?>" />
+                <button type="button" class="button" id="hzr-rollback-one"><?php esc_html_e('Anulează ultimul', 'horoscop-zilnic'); ?></button>
+                <button type="button" class="button" id="hzr-rollback-all"><?php esc_html_e('Anulează tot', 'horoscop-zilnic'); ?></button>
+                <button type="button" class="button" id="hzr-rescan"><?php esc_html_e('Re-evaluează articolele sărite', 'horoscop-zilnic'); ?></button>
+            </p>
+            <p><span id="hzr-action-result" style="font-weight:600;"></span></p>
+            <p class="description" style="max-width:900px;">
+                <?php esc_html_e('„Testează pe un articol" procesează pe loc un singur articol (durează 20-60 de secunde) și îți dă linkul, ca să verifici calitatea înainte de a porni tot. „Anulează" pune la loc conținutul original din backup.', 'horoscop-zilnic'); ?>
+            </p>
+
+            <hr />
+
+            <h2><?php esc_html_e('Setări', 'horoscop-zilnic'); ?></h2>
+            <form method="post" action="options.php" style="max-width:760px;">
+                <?php settings_fields('hzr_settings'); ?>
+                <table class="form-table" role="presentation">
+                    <tr>
+                        <th scope="row"><?php esc_html_e('Modul activ', 'horoscop-zilnic'); ?></th>
+                        <td>
+                            <input type="hidden" name="hzr_enabled" value="0" />
+                            <label><input type="checkbox" name="hzr_enabled" value="1" <?php checked(1, (int) get_option('hzr_enabled', 0)); ?> /> <?php esc_html_e('Procesează automat articole în fiecare zi', 'horoscop-zilnic'); ?></label>
+                            <p class="description"><?php esc_html_e('Oprit = nu se atinge niciun articol (butonul de test funcționează oricum).', 'horoscop-zilnic'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><?php esc_html_e('Blocuri adăugate', 'horoscop-zilnic'); ?></th>
+                        <td>
+                            <input type="hidden" name="hzr_do_takeaways" value="0" />
+                            <label><input type="checkbox" name="hzr_do_takeaways" value="1" <?php checked(1, (int) get_option('hzr_do_takeaways', 1)); ?> /> <?php esc_html_e('„Ce trebuie să reții" (idei-cheie, la început)', 'horoscop-zilnic'); ?></label><br />
+                            <input type="hidden" name="hzr_do_faq" value="0" />
+                            <label><input type="checkbox" name="hzr_do_faq" value="1" <?php checked(1, (int) get_option('hzr_do_faq', 1)); ?> /> <?php esc_html_e('„Întrebări frecvente" (la final, cu schema FAQPage)', 'horoscop-zilnic'); ?></label><br />
+                            <input type="hidden" name="hzr_do_meta" value="0" />
+                            <label><input type="checkbox" name="hzr_do_meta" value="1" <?php checked(1, (int) get_option('hzr_do_meta', 1)); ?> /> <?php esc_html_e('Descriere pentru Google (meta description) — DOAR unde lipsește', 'horoscop-zilnic'); ?></label><br />
+                            <input type="hidden" name="hzr_meta_overwrite" value="0" />
+                            <label style="margin-left:22px;"><input type="checkbox" name="hzr_meta_overwrite" value="1" <?php checked(1, (int) get_option('hzr_meta_overwrite', 0)); ?> /> <?php esc_html_e('…și suprascrie descrierile existente (atenție: pierzi ce e scris acum)', 'horoscop-zilnic'); ?></label>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><?php esc_html_e('Rescrie și titlul', 'horoscop-zilnic'); ?></th>
+                        <td>
+                            <input type="hidden" name="hzr_do_title" value="0" />
+                            <label><input type="checkbox" name="hzr_do_title" value="1" <?php checked(1, (int) get_option('hzr_do_title', 0)); ?> /> <?php esc_html_e('Da, dar numai unde n-avem ce pierde', 'horoscop-zilnic'); ?></label>
+                            <p class="description">
+                                <?php esc_html_e('Titlul se schimbă DOAR dacă e mai scurt decât pragul de mai jos sau dacă e duplicat pe site. URL-ul (slug-ul) nu se atinge niciodată, iar titlul original se salvează pentru anulare. Un articol care rankează deja nu se atinge - o schimbare de titlu acolo poate pierde poziții.', 'horoscop-zilnic'); ?>
+                            </p>
+                            <label><?php esc_html_e('Prag „titlu slab" (caractere):', 'horoscop-zilnic'); ?>
+                                <input type="number" name="hzr_title_max_len" min="20" max="60" value="<?php echo esc_attr((int) get_option('hzr_title_max_len', 40)); ?>" />
+                            </label>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><?php esc_html_e('Titlurile blocurilor', 'horoscop-zilnic'); ?></th>
+                        <td>
+                            <input type="text" name="hzr_tk_heading" class="regular-text" value="<?php echo esc_attr((string) get_option('hzr_tk_heading', '')); ?>" placeholder="<?php esc_attr_e('ex. Ce trebuie să reții', 'horoscop-zilnic'); ?>" /><br />
+                            <input type="text" name="hzr_faq_heading" class="regular-text" style="margin-top:6px;" value="<?php echo esc_attr((string) get_option('hzr_faq_heading', '')); ?>" placeholder="<?php esc_attr_e('ex. Întrebări frecvente', 'horoscop-zilnic'); ?>" />
+                            <p class="description">
+                                <?php esc_html_e('Lăsate goale, fiecare site primește automat o altă variantă - aceleași două titluri pe zeci de mii de articole din toate site-urile ar fi ele însele un tipar. Titlul de FAQ TREBUIE să conțină „întrebări frecvente", „întrebări și răspunsuri" sau „FAQ", altfel tema nu mai emite schema FAQPage (dacă nu conține, se revine automat la varianta implicită).', 'horoscop-zilnic'); ?>
+                            </p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="hzr_tk_count"><?php esc_html_e('Câte idei / câte întrebări', 'horoscop-zilnic'); ?></label></th>
+                        <td>
+                            <input type="number" name="hzr_tk_count" id="hzr_tk_count" min="3" max="6" value="<?php echo esc_attr((int) get_option('hzr_tk_count', 4)); ?>" />
+                            <span class="description"><?php esc_html_e('idei-cheie', 'horoscop-zilnic'); ?></span>
+                            &nbsp;&nbsp;
+                            <input type="number" name="hzr_faq_count" id="hzr_faq_count" min="2" max="6" value="<?php echo esc_attr((int) get_option('hzr_faq_count', 4)); ?>" />
+                            <span class="description"><?php esc_html_e('întrebări', 'horoscop-zilnic'); ?></span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="hzr_tk_pos"><?php esc_html_e('Poziția ideilor-cheie', 'horoscop-zilnic'); ?></label></th>
+                        <td>
+                            <?php $tp = (string) get_option('hzr_tk_pos', 'top'); ?>
+                            <select name="hzr_tk_pos" id="hzr_tk_pos">
+                                <option value="top" <?php selected('top', $tp); ?>><?php esc_html_e('Chiar la începutul articolului', 'horoscop-zilnic'); ?></option>
+                                <option value="after_intro" <?php selected('after_intro', $tp); ?>><?php esc_html_e('După primul paragraf (intro)', 'horoscop-zilnic'); ?></option>
+                            </select>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="hzr_daily_limit"><?php esc_html_e('Articole pe zi', 'horoscop-zilnic'); ?></label></th>
+                        <td>
+                            <input type="number" name="hzr_daily_limit" id="hzr_daily_limit" min="1" max="200" value="<?php echo esc_attr((int) get_option('hzr_daily_limit', 50)); ?>" />
+                            <p class="description"><?php esc_html_e('Recomandat 50-100. Un val simultan pe toate site-urile e el însuși o amprentă; ritmul lent arată ca întreținere editorială normală.', 'horoscop-zilnic'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="hzr_gap"><?php esc_html_e('Pauză între articole (secunde)', 'horoscop-zilnic'); ?></label></th>
+                        <td><input type="number" name="hzr_gap" id="hzr_gap" min="30" max="3600" step="10" value="<?php echo esc_attr((int) get_option('hzr_gap', 300)); ?>" /></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="hzr_order"><?php esc_html_e('Ordinea', 'horoscop-zilnic'); ?></label></th>
+                        <td>
+                            <?php $ord = (string) get_option('hzr_order', 'DESC'); ?>
+                            <select name="hzr_order" id="hzr_order">
+                                <option value="DESC" <?php selected('DESC', $ord); ?>><?php esc_html_e('Articolele recente întâi', 'horoscop-zilnic'); ?></option>
+                                <option value="ASC" <?php selected('ASC', $ord); ?>><?php esc_html_e('Articolele vechi întâi', 'horoscop-zilnic'); ?></option>
+                            </select>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="hzr_model"><?php esc_html_e('Model', 'horoscop-zilnic'); ?></label></th>
+                        <td>
+                            <?php $rm = (string) get_option('hzr_model', ''); ?>
+                            <select name="hzr_model" id="hzr_model">
+                                <option value=""><?php esc_html_e('Modelul implicit din AI Writer', 'horoscop-zilnic'); ?></option>
+                                <?php foreach ($models as $id => $m) : ?>
+                                    <option value="<?php echo esc_attr($id); ?>" <?php selected($id, $rm); ?>><?php echo esc_html($m['label']); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <p class="description"><?php esc_html_e('Sarcina e simplă (extragere din text) - un model ieftin e suficient și costă de câteva ori mai puțin pe mii de articole.', 'horoscop-zilnic'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="hzr_min_words"><?php esc_html_e('Lungime minimă articol (cuvinte)', 'horoscop-zilnic'); ?></label></th>
+                        <td><input type="number" name="hzr_min_words" id="hzr_min_words" min="50" max="2000" step="10" value="<?php echo esc_attr((int) get_option('hzr_min_words', 250)); ?>" /></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="hzr_max_chars"><?php esc_html_e('Cât din articol trimitem la model (caractere)', 'horoscop-zilnic'); ?></label></th>
+                        <td>
+                            <input type="number" name="hzr_max_chars" id="hzr_max_chars" min="1000" max="20000" step="500" value="<?php echo esc_attr((int) get_option('hzr_max_chars', 8000)); ?>" />
+                            <p class="description"><?php esc_html_e('Plafon de cost: articolele foarte lungi se trunchiază. 8000 de caractere acoperă un articol obișnuit în întregime.', 'horoscop-zilnic'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><?php esc_html_e('Categorii EXCLUSE', 'horoscop-zilnic'); ?></th>
+                        <td>
+                            <input type="hidden" name="hzr_excluded_cats[]" value="" />
+                            <div style="max-height:220px;overflow:auto;border:1px solid #dcdcde;padding:8px 10px;background:#fff;">
+                                <?php foreach ($cats as $t) : ?>
+                                    <label style="display:block;margin:2px 0;">
+                                        <input type="checkbox" name="hzr_excluded_cats[]" value="<?php echo (int) $t->term_id; ?>" <?php checked(in_array((int) $t->term_id, $excluded, true)); ?> />
+                                        <?php echo esc_html($t->name); ?> <span class="description">(<?php echo (int) $t->count; ?>)</span>
+                                    </label>
+                                <?php endforeach; ?>
+                            </div>
+                            <p class="description"><?php esc_html_e('Pre-bifate automat: advertoriale/sponsorizate și știri (actualitate, politică, economie, externe). Subcategoriile lor se exclud odată cu ele.', 'horoscop-zilnic'); ?></p>
+                        </td>
+                    </tr>
+                </table>
+
+                <h2><?php esc_html_e('Prompturi (avansat)', 'horoscop-zilnic'); ?></h2>
+                <table class="form-table" role="presentation">
+                    <tr>
+                        <th scope="row"><label for="hzr_system_prompt"><?php esc_html_e('System prompt', 'horoscop-zilnic'); ?></label></th>
+                        <td>
+                            <?php $sp = (string) get_option('hzr_system_prompt', ''); if (trim($sp) === '') { $sp = HZ_Refresh::default_system_prompt(); } ?>
+                            <textarea name="hzr_system_prompt" id="hzr_system_prompt" class="large-text code" rows="10"><?php echo esc_textarea($sp); ?></textarea>
+                            <p class="description"><?php esc_html_e('Regulile de stil. Cea mai importantă: modelul folosește EXCLUSIV informații din textul primit, nu inventează.', 'horoscop-zilnic'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="hzr_prompt"><?php esc_html_e('Prompt', 'horoscop-zilnic'); ?></label></th>
+                        <td>
+                            <?php $pp = (string) get_option('hzr_prompt', ''); if (trim($pp) === '') { $pp = HZ_Refresh::default_prompt(); } ?>
+                            <textarea name="hzr_prompt" id="hzr_prompt" class="large-text code" rows="8"><?php echo esc_textarea($pp); ?></textarea>
+                            <p class="description"><?php esc_html_e('Placeholdere: {{titlu}}, {{continut}}, {{n_faq}}, {{n_idei}}. Răspunsul TREBUIE să rămână JSON.', 'horoscop-zilnic'); ?></p>
+                        </td>
+                    </tr>
+                </table>
+                <?php submit_button(__('Salvează setările', 'horoscop-zilnic')); ?>
+            </form>
+        <?php
+    }
+}
+
+if (!function_exists('hz_sanitize_cat_csv')) {
+    /** Lista de categorii excluse vine din checkbox-uri (array) și se stochează CSV. */
+    function hz_sanitize_cat_csv($val) {
+        if (is_array($val)) {
+            $ids = array_filter(array_map('absint', $val));
+            return implode(',', array_unique($ids));
+        }
+        $ids = array_filter(array_map('absint', explode(',', (string) $val)));
+        return implode(',', array_unique($ids));
     }
 }
 

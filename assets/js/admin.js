@@ -244,6 +244,104 @@
         refresh();
     }
 
+    /* ---- Refresh conținut (FAQ + idei-cheie pe articolele existente) ---- */
+    function initRefresh() {
+        if (!$('#hzr-progress').length) { return; }
+        var $res = $('#hzr-action-result');
+
+        function say(ok, msg) {
+            $res.css('color', ok ? '#00a32a' : '#b32d2e').html((ok ? '✓ ' : '✗ ') + msg);
+        }
+
+        function refresh() {
+            $.post(HZAdmin.ajaxUrl, { action: 'hzr_status', nonce: HZAdmin.nonce }).done(function (r) {
+                if (!r || !r.success) { return; }
+                var d = r.data, c = d.counts || {};
+                $('#hzr-c-total').text(c.total || 0);
+                $('#hzr-c-cats').text(c.excl_cats || 0);
+                $('#hzr-c-skip').text(c.skipped || 0);
+                $('#hzr-c-done').text(c.done || 0);
+                $('#hzr-c-elig').text(c.eligible || 0);
+
+                var info = 'Azi: <strong>' + d.today + '/' + d.limit + '</strong> articole. ' +
+                           'Total procesate: <strong>' + d.done + '</strong>. Cost cumulat: <strong>$' + d.cost + '</strong>.';
+                if (!d.enabled) {
+                    info += ' <span style="color:#996800;">Modulul e OPRIT din setări.</span>';
+                } else if (d.stopped) {
+                    info += ' <span style="color:#996800;">Procesare pusă pe pauză.</span>';
+                } else if (d.next) {
+                    info += ' Următorul articol: ' + d.next + '.';
+                }
+                if (d.idle) { info += ' <span style="color:#996800;">Nu mai sunt articole eligibile.</span>'; }
+                if (d.error) { info += ' <span style="color:#b32d2e;">Ultima eroare: ' + d.error + '</span>'; }
+                $('#hzr-progress').html(info);
+
+                $('#hzr-toggle').data('stopped', d.stopped ? 1 : 0)
+                    .text(d.stopped ? 'Repornește procesarea' : 'Oprește procesarea');
+            });
+        }
+
+        $('#hzr-toggle').on('click', function () {
+            var stopNow = $(this).data('stopped') ? 0 : 1;
+            $.post(HZAdmin.ajaxUrl, { action: 'hzr_toggle', nonce: HZAdmin.nonce, stop: stopNow }).done(function (r) {
+                if (r && r.success) { say(true, r.data.message); }
+                refresh();
+            });
+        });
+
+        $('#hzr-test').on('click', function () {
+            var $btn = $(this);
+            $btn.prop('disabled', true);
+            $res.css('color', '').text('Se procesează un articol… (20-60 de secunde)');
+            $.post(HZAdmin.ajaxUrl, {
+                action: 'hzr_test',
+                nonce: HZAdmin.nonce,
+                post_id: $('#hzr-test-id').val() || 0
+            }).done(function (r) {
+                if (r && r.success) {
+                    var d = r.data;
+                    say(true, d.message + ' <a href="' + d.link + '" target="_blank">Vezi articolul</a>' +
+                        (d.edit ? ' · <a href="' + d.edit + '" target="_blank">Editează</a>' : '') +
+                        ' <span style="font-weight:400;color:#666;">($' + d.cost + ')</span>');
+                } else {
+                    say(false, (r && r.data && r.data.message) ? r.data.message : 'Eroare');
+                }
+                refresh();
+            }).fail(function () {
+                say(false, 'Eroare de rețea (sau timeout - articolul poate fi totuși procesat, reîncarcă pagina).');
+            }).always(function () {
+                $btn.prop('disabled', false);
+            });
+        });
+
+        function rollback(scope, confirmMsg) {
+            if (!window.confirm(confirmMsg)) { return; }
+            $res.css('color', '').text('Se restaurează…');
+            $.post(HZAdmin.ajaxUrl, { action: 'hzr_rollback', nonce: HZAdmin.nonce, scope: scope }).done(function (r) {
+                say(!!(r && r.success), (r && r.data && r.data.message) ? r.data.message : 'Eroare');
+                refresh();
+            });
+        }
+
+        $('#hzr-rollback-one').on('click', function () {
+            rollback('one', 'Pui la loc conținutul original pentru ultimul articol procesat?');
+        });
+        $('#hzr-rollback-all').on('click', function () {
+            rollback('all', 'Pui la loc conținutul original pentru TOATE articolele procesate? (se face în loturi de 25)');
+        });
+
+        $('#hzr-rescan').on('click', function () {
+            $res.css('color', '').text('Se re-evaluează…');
+            $.post(HZAdmin.ajaxUrl, { action: 'hzr_rescan', nonce: HZAdmin.nonce }).done(function (r) {
+                say(!!(r && r.success), (r && r.data && r.data.message) ? r.data.message : 'Eroare');
+                refresh();
+            });
+        });
+
+        refresh();
+        setInterval(refresh, 30000);
+    }
+
     $(function () {
         // Horoscop
         initImagePicker('hz', 'Alege imaginea de cover pentru horoscop');
@@ -253,5 +351,7 @@
         initTestButton('hzw', 'hzw_test');
         // Articole Bulk
         initBulk();
+        // Refresh conținut
+        initRefresh();
     });
 })(jQuery);

@@ -2,8 +2,8 @@
 /**
  * Plugin Name: AI Writer & Conținut Zilnic
  * Plugin URI: https://targetseo.ro/
- * Description: Generează și rescrie articole SEO direct în editor (GPT-5.6 și Claude), creează articole în bulk cu imagini de stock relevante (Magnific) și publică automat conținut zilnic: horoscopul cu toate cele 12 zodii și vremea pe regiuni (date oficiale ANM). Un singur plugin: chei API, costuri, editor, bulk, horoscop și vreme.
- * Version: 3.1.10
+ * Description: Generează și rescrie articole SEO direct în editor (GPT-5.6 și Claude), creează articole în bulk cu imagini de stock relevante (Magnific), împrospătează articolele existente cu întrebări frecvente și idei-cheie (schema FAQPage) și publică automat conținut zilnic: horoscopul cu toate cele 12 zodii și vremea pe regiuni (date oficiale ANM). Un singur plugin: chei API, costuri, editor, bulk, refresh, horoscop și vreme.
+ * Version: 3.3.1
  * Author: Eduard / TargetSEO
  * Text Domain: horoscop-zilnic
  * Requires at least: 5.6
@@ -15,7 +15,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('HZ_VERSION', '3.1.10');
+define('HZ_VERSION', '3.3.1');
 define('HZ_PATH', plugin_dir_path(__FILE__));
 define('HZ_URL', plugin_dir_url(__FILE__));
 
@@ -30,6 +30,7 @@ require_once HZ_PATH . 'includes/class-hz-horoscope.php';
 require_once HZ_PATH . 'includes/class-hz-weather.php';
 require_once HZ_PATH . 'includes/class-hz-magnific.php';
 require_once HZ_PATH . 'includes/class-hz-bulk.php';
+require_once HZ_PATH . 'includes/class-hz-refresh.php';
 require_once HZ_PATH . 'includes/class-hz-admin.php';
 require_once HZ_PATH . 'includes/class-hz-updater.php';
 
@@ -38,6 +39,7 @@ function hz_init() {
     (new HZ_Horoscope())->init();
     (new HZ_Weather())->init();
     (new HZ_Bulk())->init();
+    (new HZ_Refresh())->init();
     (new HZ_Updater())->init();
 }
 add_action('plugins_loaded', 'hz_init');
@@ -152,6 +154,12 @@ add_action('init', function () {
         add_option($name, $value, '', 'no');
     }
 
+    // v3.2.0: modul nou „Refresh conținut" (FAQ + idei-cheie pe articolele existente).
+    // Vine OPRIT (hzr_enabled = 0): userul îl pornește per site după ce verifică un test.
+    foreach (HZ_Refresh::defaults() as $name => $value) {
+        add_option($name, $value, '', 'no');
+    }
+
     // v3.1.10: backdatarea articolelor bulk trebuie pornită pe TOATĂ flota. add_option
     // de mai sus nu atinge site-urile unde opțiunea există deja pe 0 (salvată înainte
     // ca bifa să apară în formular), deci o forțăm O SINGURĂ DATĂ, cu flag propriu —
@@ -217,10 +225,14 @@ register_activation_hook(__FILE__, function () {
     foreach (hz_bulk_defaults() as $name => $value) {
         add_option($name, $value, '', 'no');
     }
+    foreach (HZ_Refresh::defaults() as $name => $value) {
+        add_option($name, $value, '', 'no');
+    }
 });
 
 register_deactivation_hook(__FILE__, function () {
     wp_clear_scheduled_hook(HZ_Horoscope::HOOK);
     wp_clear_scheduled_hook(HZ_Weather::HOOK);
     wp_clear_scheduled_hook(HZ_Bulk::HOOK);
+    wp_clear_scheduled_hook(HZ_Refresh::HOOK);
 });

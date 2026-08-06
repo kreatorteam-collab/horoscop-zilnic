@@ -112,7 +112,9 @@ class CW_API {
             $payload['temperature'] = max(0.0, min(1.0, $temp));
         }
         if (!empty($m['effort'])) {
-            $effort = get_option('cw_effort', 'medium');
+            // Filtrabil (v3.2.0): sarcinile simple (ex. extragerea de FAQ dintr-un text
+            // existent) cer explicit 'low' — aceeași calitate, de câteva ori mai ieftin.
+            $effort = apply_filters('cw_effort', get_option('cw_effort', 'medium'), $model_id);
             if (!in_array($effort, array('low', 'medium', 'high'), true)) { $effort = 'medium'; }
             $payload['output_config'] = array('effort' => $effort);
         }
@@ -154,7 +156,7 @@ class CW_API {
 
         // Modelele GPT-5.x resping temperature custom; effort-ul se mapează direct.
         if (!empty($m['effort'])) {
-            $effort = get_option('cw_effort', 'medium');
+            $effort = apply_filters('cw_effort', get_option('cw_effort', 'medium'), $model_id);
             if (!in_array($effort, array('low', 'medium', 'high'), true)) { $effort = 'medium'; }
             $payload['reasoning_effort'] = $effort;
         }

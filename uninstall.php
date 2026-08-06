@@ -13,6 +13,14 @@ $options = array(
     'hzb_magnific_key', 'hzb_images', 'hzb_image_size', 'hzb_daily_limit', 'hzb_length',
     'hzb_author', 'hzb_ai_excluded', 'hzb_random_date', 'hzb_queue', 'hzb_used_ids', 'hzb_dl_day', 'hzb_paused_reason',
     'hzb_stopped', 'hzb_gap', 'hzb_exhausted_day', 'hzb_rd_forced',
+    // Modul Refresh conținut (v3.2.0) — opțiunile hzr_*. Atenție: post_meta-urile
+    // _hzr_* (inclusiv backup-ul conținutului original) NU se șterg — sunt plasa de
+    // siguranță a articolelor deja modificate.
+    'hzr_enabled', 'hzr_model', 'hzr_daily_limit', 'hzr_gap', 'hzr_do_faq', 'hzr_do_takeaways',
+    'hzr_faq_count', 'hzr_tk_count', 'hzr_tk_pos', 'hzr_min_words', 'hzr_order', 'hzr_max_chars',
+    'hzr_excluded_cats', 'hzr_cats_seeded', 'hzr_stopped', 'hzr_prompt', 'hzr_system_prompt',
+    'hzr_do_meta', 'hzr_meta_overwrite', 'hzr_do_title', 'hzr_title_max_len', 'hzr_faq_heading', 'hzr_tk_heading',
+    'hzr_day', 'hzr_stats', 'hzr_idle', 'hzr_last_error',
     // Modulul AI Writer inclus (fost plugin claude-writer) — opțiunile cw_*:
     'cw_api_key', 'cw_openai_api_key', 'cw_model_default_gpt56', 'cw_model_default_sonnet',
     'cw_default_model', 'cw_effort', 'cw_temperature', 'cw_max_tokens', 'cw_stream_enabled',
@@ -29,8 +37,10 @@ delete_transient('hz_horo_lock');
 delete_transient('hz_weather_lock');
 delete_transient('hz_weather_anm_xml');
 delete_transient('hz_bulk_lock');
+delete_transient('hz_refresh_lock');
 delete_transient('hzb_central_dl');
 delete_transient('hzb_central_ex');
 wp_clear_scheduled_hook('hz_horoscope_daily');
 wp_clear_scheduled_hook('hz_weather_daily');
 wp_clear_scheduled_hook('hz_bulk_process');
+wp_clear_scheduled_hook('hz_refresh_tick');

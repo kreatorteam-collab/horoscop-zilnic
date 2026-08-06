@@ -1,0 +1,69 @@
+/*
+ * Blocurile adăugate de modulul „Refresh conținut": idei-cheie + întrebări frecvente.
+ * Se încarcă DOAR pe articolele procesate (meta _hzr_done).
+ * Variabilele sunt cele ale temei Magpress, cu fallback pentru orice altă temă.
+ */
+
+.article-body .entry-content .hzr-takeaways,
+.entry-content .hzr-takeaways {
+    background: var(--c-surface, #f6f7f5);
+    border: 1px solid var(--c-border, #e6e6e6);
+    border-left: 4px solid var(--c-accent, #6fa84a);
+    border-radius: 6px;
+    padding: 1.1rem 1.3rem .9rem;
+    margin: 0 0 1.6rem;
+}
+
+.article-body .entry-content .hzr-takeaways > h2,
+.entry-content .hzr-takeaways > h2 {
+    font-size: 1.05rem;
+    line-height: 1.3;
+    margin: 0 0 .6rem;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--c-text, #1a1a1a);
+}
+
+.article-body .entry-content .hzr-takeaways ul,
+.entry-content .hzr-takeaways ul {
+    margin: 0;
+    padding-left: 1.15rem;
+    list-style: disc;
+}
+
+.article-body .entry-content .hzr-takeaways li,
+.entry-content .hzr-takeaways li {
+    margin: 0 0 .45rem;
+    line-height: 1.55;
+}
+
+.article-body .entry-content .hzr-faq,
+.entry-content .hzr-faq {
+    margin: 2rem 0 0;
+    padding-top: 1.2rem;
+    border-top: 1px solid var(--c-border, #e6e6e6);
+}
+
+.article-body .entry-content .hzr-faq > h3,
+.entry-content .hzr-faq > h3 {
+    margin: 1.3rem 0 .35rem;
+    font-size: 1.08rem;
+    line-height: 1.35;
+}
+
+.article-body .entry-content .hzr-faq > h3:first-of-type,
+.entry-content .hzr-faq > h3:first-of-type {
+    margin-top: .8rem;
+}
+
+.article-body .entry-content .hzr-faq > p,
+.entry-content .hzr-faq > p {
+    margin: 0 0 .2rem;
+}
+
+@media (max-width: 600px) {
+    .article-body .entry-content .hzr-takeaways,
+    .entry-content .hzr-takeaways {
+        padding: .9rem 1rem .7rem;
+    }
+}
