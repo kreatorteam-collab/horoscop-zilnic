@@ -43,6 +43,19 @@ class HZ_Refresh {
 
         // Pornirea/oprirea din setări programează sau curăță cronul imediat.
         add_action('update_option_hzr_enabled', array($this, 'on_toggle_option'), 10, 2);
+
+        // v3.3.2 — auto-reparare: dacă modulul e pornit dar nu mai are niciun tick
+        // programat (eveniment pierdut la o curățare de cron, o rulare întreruptă,
+        // un plugin care șterge programările), coada s-ar opri tăcut pentru totdeauna.
+        add_action('wp_loaded', array($this, 'ensure_scheduled'));
+    }
+
+    public function ensure_scheduled() {
+        if (defined('DOING_CRON') && DOING_CRON) { return; } // tick-ul își reprogramează singur
+        if (!(int) $this->opt('hzr_enabled') || (int) $this->opt('hzr_stopped')) { return; }
+        if (wp_next_scheduled(self::HOOK)) { return; }
+        if (get_transient(self::LOCK)) { return; }           // rulează chiar acum
+        wp_schedule_single_event(time() + 60, self::HOOK);
     }
 
     /* ===================== Setări ===================== */
