@@ -256,6 +256,9 @@ class HZ_Refresh {
         // dată anume — un FAQ pe „Horoscop joi, 6 august" nu are nicio valoare.
         if (get_post_meta($post->ID, '_hz_horoscope', true)) { return 'horoscop zilnic'; }
         if (get_post_meta($post->ID, '_hz_weather', true))   { return 'vremea zilnică'; }
+        // v3.4.3: articolele generate cu „Articole Bulk" sunt deja conținut nou, scris
+        // recent — n-au nevoie de un motiv de recrawl și n-are sens să le schimbăm data.
+        if (get_post_meta($post->ID, '_hzb_bulk', true))     { return 'articol bulk (generat recent)'; }
         // Articolele marcate 18+ în editor (age-gate-ul temei) — indiferent de categorie.
         if (get_post_meta($post->ID, '_magpress_adult', true)) { return 'conținut 18+'; }
 
