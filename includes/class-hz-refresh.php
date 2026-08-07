@@ -33,6 +33,9 @@ class HZ_Refresh {
     /** Filtrul activ care fixează post_modified pe durata scrierilor unui articol. */
     private $mod_filter = null;
 
+    /** Ora aleasă pentru articolul în lucru (vezi freeze_modified). */
+    private $mod_ts = 0;
+
     /**
      * v3.4.6 — DECALAJ DE MINUTE pe data modificării.
      * Cron-ul hostingului rulează doar la :00/:15/:30/:45, sincronizat pe toate
@@ -50,6 +53,7 @@ class HZ_Refresh {
         $ts   = time() - wp_rand(0, $span * MINUTE_IN_SECONDS);
         $pub = (int) get_post_time('U', true, $post);
         if ($ts <= $pub) { $ts = time(); } // articol foarte recent: lăsăm ora reală
+        $this->mod_ts = $ts;
 
         $this->mod_filter = function ($data) use ($ts) {
             $data['post_modified']     = get_date_from_gmt(gmdate('Y-m-d H:i:s', $ts));
@@ -64,6 +68,31 @@ class HZ_Refresh {
             remove_filter('wp_insert_post_data', $this->mod_filter, 99);
             $this->mod_filter = null;
         }
+    }
+
+    /**
+     * v3.4.7 — ora aleasă trebuie să fie ULTIMUL cuvânt.
+     * Alte pluginuri se agață de `save_post` și re-salvează articolul după noi (pe
+     * flotă o face inserarea de linkuri interne), iar `wp_update_post`-ul lor pune la
+     * loc ora exactă — măsurat: decalajul supraviețuia doar pe ~jumătate din articole.
+     * Scriem deci direct în tabel, pe `shutdown`, după ce toate hook-urile au terminat.
+     */
+    private function enforce_modified($post_id) {
+        if (!$this->mod_ts) { return; }
+        $ts = $this->mod_ts;
+        $this->mod_ts = 0;
+        add_action('shutdown', function () use ($post_id, $ts) {
+            global $wpdb;
+            $wpdb->update(
+                $wpdb->posts,
+                array(
+                    'post_modified'     => get_date_from_gmt(gmdate('Y-m-d H:i:s', $ts)),
+                    'post_modified_gmt' => gmdate('Y-m-d H:i:s', $ts),
+                ),
+                array('ID' => (int) $post_id)
+            );
+            clean_post_cache((int) $post_id);
+        }, 99);
     }
 
     public function init() {
@@ -656,7 +685,8 @@ class HZ_Refresh {
             $parts[] = $nt !== '' ? 'titlu nou („' . $nt . '")' : 'titlu păstrat';
         }
 
-        $this->unfreeze_modified(); // de aici încolo, orice scriere revine la ora reală
+        $this->unfreeze_modified();      // de aici încolo, orice scriere revine la ora reală
+        $this->enforce_modified($post->ID); // …dar ora noastră se rescrie la final, peste toți
         $this->bump_stats($cost);
         return array(
             'ok'   => true,
