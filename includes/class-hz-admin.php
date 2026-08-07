@@ -113,6 +113,7 @@ class HZ_Admin {
             'hzr_min_words'     => 'absint',
             'hzr_order'         => 'sanitize_text_field',
             'hzr_max_chars'     => 'absint',
+            'hzr_time_jitter'   => 'absint',
             'hzr_excluded_cats' => 'hz_sanitize_cat_csv',
             'hzr_prompt'        => 'hz_sanitize_prompt',
             'hzr_system_prompt' => 'hz_sanitize_prompt',

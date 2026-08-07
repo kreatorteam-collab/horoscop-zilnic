@@ -30,6 +30,42 @@ class HZ_Refresh {
     /** True dacă next_candidate() a golit chiar coada (vs. i s-a terminat bugetul de scanare). */
     public $exhausted = false;
 
+    /** Filtrul activ care fixează post_modified pe durata scrierilor unui articol. */
+    private $mod_filter = null;
+
+    /**
+     * v3.4.6 — DECALAJ DE MINUTE pe data modificării.
+     * Cron-ul hostingului rulează doar la :00/:15/:30/:45, sincronizat pe toate
+     * site-urile, deci articolele primeau timestamp-uri fix pe granițele de sfert de
+     * oră, identice pe zeci de domenii. Aici împingem `post_modified` cu 0-14 minute
+     * ÎN INTERIORUL aceluiași sfert de oră: ziua nu se schimbă, semnalul de recrawl
+     * rămâne același interval, dar momentele nu mai cad toate în același minut.
+     * Garanție: niciodată înaintea datei de publicare.
+     */
+    private function freeze_modified($post) {
+        $span = (int) $this->opt('hzr_time_jitter');
+        if ($span <= 0) { return; }
+
+        $span = min(60, $span); // minute; peste o oră n-are sens (am ieși din fereastra cron)
+        $ts   = time() - wp_rand(0, $span * MINUTE_IN_SECONDS);
+        $pub = (int) get_post_time('U', true, $post);
+        if ($ts <= $pub) { $ts = time(); } // articol foarte recent: lăsăm ora reală
+
+        $this->mod_filter = function ($data) use ($ts) {
+            $data['post_modified']     = get_date_from_gmt(gmdate('Y-m-d H:i:s', $ts));
+            $data['post_modified_gmt'] = gmdate('Y-m-d H:i:s', $ts);
+            return $data;
+        };
+        add_filter('wp_insert_post_data', $this->mod_filter, 99);
+    }
+
+    private function unfreeze_modified() {
+        if ($this->mod_filter) {
+            remove_filter('wp_insert_post_data', $this->mod_filter, 99);
+            $this->mod_filter = null;
+        }
+    }
+
     public function init() {
         add_action(self::HOOK, array($this, 'process_tick'));
 
@@ -83,6 +119,7 @@ class HZ_Refresh {
             'hzr_min_words'     => 250,
             'hzr_order'         => 'DESC', // articolele recente întâi
             'hzr_max_chars'     => 8000,   // cât din articol trimitem la model
+            'hzr_time_jitter'   => 14,     // minute de decalaj pe ora modificării (0 = ora exactă)
             'hzr_excluded_cats' => '',     // CSV de ID-uri (se auto-completează la prima rulare)
             'hzr_cats_seeded'   => 0,
             'hzr_stopped'       => 0,
@@ -586,6 +623,10 @@ class HZ_Refresh {
         $content = $this->insert_takeaways($original, $tk_html);
         $content = rtrim($content) . "\n" . $faq_html;
 
+        // Toate scrierile articolului (conținut, rezumat, titlu) primesc ACEEAȘI oră,
+        // decalată cu câteva minute — altfel ultima scriere ar readuce ora exactă.
+        $this->freeze_modified($post);
+
         // post_date NU se atinge; post_modified se schimbă natural (editare reală).
         $updated = wp_update_post(array(
             'ID'           => $post->ID,
@@ -593,6 +634,7 @@ class HZ_Refresh {
         ), true);
 
         if (is_wp_error($updated)) {
+            $this->unfreeze_modified();
             delete_post_meta($post->ID, self::META_BACKUP);
             return array('ok' => false, 'msg' => $updated->get_error_message(), 'cost' => $cost);
         }
@@ -614,6 +656,7 @@ class HZ_Refresh {
             $parts[] = $nt !== '' ? 'titlu nou („' . $nt . '")' : 'titlu păstrat';
         }
 
+        $this->unfreeze_modified(); // de aici încolo, orice scriere revine la ora reală
         $this->bump_stats($cost);
         return array(
             'ok'   => true,
