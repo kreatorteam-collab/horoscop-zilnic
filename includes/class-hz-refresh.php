@@ -647,11 +647,32 @@ class HZ_Refresh {
         update_option('hzr_stats', $t, 'no');
     }
 
+    /**
+     * Decalaj stabil, propriu fiecărui site (0..$span secunde), derivat din domeniu.
+     * Fără el, site-urile pornite în aceeași zi ajung să ruleze în pas.
+     */
+    private function site_offset($span = 900) {
+        $span = max(1, (int) $span);
+        return hexdec(substr(md5($this->site_host()), 8, 6)) % $span;
+    }
+
+    /**
+     * v3.4.5 — DECALAJ ALEATOR la fiecare programare.
+     * Hostingul rulează cron-ul din sfert în sfert de oră, sincronizat pe toate
+     * site-urile, deci articolele cădeau la aceeași secundă pe zeci de domenii
+     * (06:30:07, 06:30:08, …). Adăugăm un decalaj propriu site-ului plus unul
+     * aleator la fiecare tick, ca momentele să pice pe granițe diferite și site-urile
+     * să nu mai meargă în pas. Nu afectează ritmul: limita zilnică rămâne pragul real.
+     */
     public function kick($delay = 5) {
         if (!(int) $this->opt('hzr_enabled')) { return; }
         if ((int) $this->opt('hzr_stopped')) { return; }
         if (!wp_next_scheduled(self::HOOK)) {
-            wp_schedule_single_event(time() + max(1, (int) $delay), self::HOOK);
+            $delay = max(1, (int) $delay);
+            if ($delay >= 60) { // doar la ritmul normal, nu la pornirile imediate/test
+                $delay += $this->site_offset(600) + wp_rand(0, 900);
+            }
+            wp_schedule_single_event(time() + $delay, self::HOOK);
         }
         if (!get_transient(self::LOCK) && function_exists('spawn_cron')) { spawn_cron(); }
     }
@@ -660,9 +681,15 @@ class HZ_Refresh {
         if ((int) $new) { $this->kick(10); } else { wp_clear_scheduled_hook(self::HOOK); }
     }
 
-    /** Mâine la 00:10, ora site-ului (limita zilnică s-a atins). */
+    /**
+     * Reluarea de mâine, după miezul nopții (limita zilnică s-a atins).
+     * v3.4.5: ora diferă de la site la site (00:10 + până la ~4h30, propriu domeniului
+     * plus o jumătate de oră aleatoare) — altfel toate site-urile reporneau în același
+     * minut și rămâneau sincronizate toată ziua următoare.
+     */
     private function schedule_tomorrow() {
         $ts = strtotime('tomorrow 00:10', current_time('timestamp')) - (int) (get_option('gmt_offset') * HOUR_IN_SECONDS);
+        $ts += $this->site_offset(4 * HOUR_IN_SECONDS) + wp_rand(0, 1800);
         if (!wp_next_scheduled(self::HOOK)) {
             wp_schedule_single_event(max(time() + 300, $ts), self::HOOK);
         }

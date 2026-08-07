@@ -46,21 +46,34 @@ class CW_Crypto {
         return $encoded;
     }
 
+    /**
+     * Desface TOATE straturile de criptare, nu doar unul.
+     * De ce: cheile se salvează prin `update_option`, iar filtrul
+     * `pre_update_option_cw_*_api_key` criptează valoarea primită. Dacă cineva
+     * pasează o valoare DEJA criptată (ex. o unealtă de configurare în masă care
+     * cripta ea însăși), rezultatul e criptat de două ori — iar o singură rundă de
+     * decriptare întorcea tot un `cwenc::…`, care ajungea trimis ca „cheie API"
+     * și primea 401. Buclă cu limită, ca să nu depindem de disciplina apelantului.
+     */
     public static function decrypt($stored) {
-        if (!self::is_encrypted($stored)) {
-            return (string) $stored; // text simplu sau valoare veche -> returnează ca atare
+        $val = (string) $stored;
+        for ($i = 0; $i < 3 && self::is_encrypted($val); $i++) {
+            if (!self::available()) {
+                return '';
+            }
+            $raw = base64_decode(substr($val, strlen(self::PREFIX)), true);
+            if ($raw === false || strlen($raw) < 28) {
+                return '';
+            }
+            $iv  = substr($raw, 0, 12);
+            $tag = substr($raw, 12, 16);
+            $ct  = substr($raw, 28);
+            $pt  = openssl_decrypt($ct, self::CIPHER, self::key(), OPENSSL_RAW_DATA, $iv, $tag);
+            if ($pt === false) {
+                return '';
+            }
+            $val = $pt;
         }
-        if (!self::available()) {
-            return '';
-        }
-        $raw = base64_decode(substr($stored, strlen(self::PREFIX)), true);
-        if ($raw === false || strlen($raw) < 28) {
-            return '';
-        }
-        $iv  = substr($raw, 0, 12);
-        $tag = substr($raw, 12, 16);
-        $ct  = substr($raw, 28);
-        $pt  = openssl_decrypt($ct, self::CIPHER, self::key(), OPENSSL_RAW_DATA, $iv, $tag);
-        return $pt === false ? '' : $pt;
+        return $val;
     }
 }

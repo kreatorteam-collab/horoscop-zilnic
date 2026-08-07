@@ -3,7 +3,7 @@
  * Plugin Name: AI Writer & Conținut Zilnic
  * Plugin URI: https://targetseo.ro/
  * Description: Generează și rescrie articole SEO direct în editor (GPT-5.6 și Claude), creează articole în bulk cu imagini de stock relevante (Magnific), împrospătează articolele existente cu întrebări frecvente și idei-cheie (schema FAQPage) și publică automat conținut zilnic: horoscopul cu toate cele 12 zodii și vremea pe regiuni (date oficiale ANM). Un singur plugin: chei API, costuri, editor, bulk, refresh, horoscop și vreme.
- * Version: 3.4.3
+ * Version: 3.4.5
  * Author: Eduard / TargetSEO
  * Text Domain: horoscop-zilnic
  * Requires at least: 5.6
@@ -15,7 +15,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('HZ_VERSION', '3.4.3');
+define('HZ_VERSION', '3.4.5');
 define('HZ_PATH', plugin_dir_path(__FILE__));
 define('HZ_URL', plugin_dir_url(__FILE__));
 
@@ -171,6 +171,33 @@ add_action('init', function () {
 
     update_option('hz_db_version', HZ_VERSION, 'no');
 });
+
+/**
+ * v3.4.4 — REPARARE cheie API criptată de două ori.
+ * Cheile scrise printr-o unealtă externă care le cripta ea însăși au trecut A DOUA
+ * oară prin filtrul `pre_update_option_cw_*_api_key` → în baza de date au rămas cu
+ * două straturi, iar apelurile primeau „Incorrect API key: cwenc::…".
+ * CW_Crypto::decrypt() desface acum orice număr de straturi, deci funcționarea e
+ * deja restabilită; aici doar rescriem valoarea CORECT în baza de date (o singură
+ * dată), pasând TEXTUL SIMPLU ca filtrul să-l cripteze exact o dată.
+ */
+add_action('init', function () {
+    if (get_option('cw_key_fix_v1')) { return; }
+    if (!class_exists('CW_Crypto')) { return; }
+
+    foreach (array('cw_api_key', 'cw_openai_api_key') as $opt) {
+        $stored = (string) get_option($opt, '');
+        if ($stored === '') { continue; }
+        $plain = CW_Crypto::decrypt($stored);
+        // Gol = cheie iremediabil coruptă (n-o atingem, userul o reintroduce);
+        // încă „cwenc::" după 3 straturi = la fel. Altfel rescriem textul simplu și
+        // lăsăm filtrul să cripteze exact o dată. Pe cheile deja corecte operația e
+        // inofensivă (aceeași cheie, alt IV).
+        if ($plain === '' || CW_Crypto::is_encrypted($plain)) { continue; }
+        update_option($opt, $plain);
+    }
+    update_option('cw_key_fix_v1', 1, 'no');
+}, 101);
 
 /** Valorile implicite ale modulului Articole Bulk (folosite la update ȘI la activare). */
 function hz_bulk_defaults() {
