@@ -54,14 +54,18 @@ class HZ_Bulk {
         return mb_strtolower(trim(preg_replace('/\s+/u', ' ', (string) $t)));
     }
 
-    /** True dacă există deja un articol (orice stare relevantă) cu acest titlu. */
-    private function post_title_exists($title) {
+    /** ID-ul unui articol existent cu acest titlu (0 dacă nu există). */
+    private function existing_post_id($title) {
         global $wpdb;
-        $found = $wpdb->get_var($wpdb->prepare(
-            "SELECT ID FROM {$wpdb->posts} WHERE post_type = 'post' AND post_status IN ('publish','draft','pending','future','private') AND post_title = %s LIMIT 1",
+        return (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT ID FROM {$wpdb->posts} WHERE post_type = 'post' AND post_status IN ('publish','draft','pending','future','private') AND post_title = %s ORDER BY ID ASC LIMIT 1",
             wp_strip_all_tags($title)
         ));
-        return !empty($found);
+    }
+
+    /** True dacă există deja un articol (orice stare relevantă) cu acest titlu. */
+    private function post_title_exists($title) {
+        return $this->existing_post_id($title) > 0;
     }
 
     /* ---- AJAX ---- */
@@ -357,14 +361,24 @@ class HZ_Bulk {
         if ((int) get_option('hzb_stopped', 0)) { return; }
         if (get_transient(self::LOCK)) { return; }
         if (!class_exists('CW_API') || !CW_API::has_key()) { return; }
-        set_transient(self::LOCK, 1, 15 * MINUTE_IN_SECONDS);
+        // v3.4.8: 30 min, nu 15. Un articol lent (API încet + descărcări de imagini)
+        // depășea vechiul TTL, lock-ul expira și următorul cron intra peste el.
+        set_transient(self::LOCK, 1, 30 * MINUTE_IN_SECONDS);
         if (function_exists('set_time_limit')) { @set_time_limit(600); }
 
         $q   = $this->queue();
         $idx = null;
         foreach ($q as $i => $item) {
-            // Un item rămas „working" = rularea anterioară a murit în mijloc; îl reluăm.
-            if ($item['s'] === 'pending' || $item['s'] === 'working') { $idx = $i; break; }
+            if ($item['s'] === 'pending') { $idx = $i; break; }
+            // v3.4.8: un item „working" se reia DOAR dacă e vechi. Înainte îl reluam
+            // imediat, presupunând că rularea anterioară a murit — dar de cele mai
+            // multe ori ea era doar în curs (generarea durează 1-3 minute), iar
+            // reluarea producea încă un articol cu același titlu.
+            $started = isset($item['started']) ? (int) $item['started'] : 0;
+            if ($item['s'] === 'working' && (!$started || (time() - $started) > 20 * MINUTE_IN_SECONDS)) {
+                $idx = $i;
+                break;
+            }
         }
         if ($idx === null) {
             delete_transient(self::LOCK);
@@ -391,7 +405,8 @@ class HZ_Bulk {
         }
         delete_option('hzb_paused_reason');
 
-        $q[$idx]['s'] = 'working';
+        $q[$idx]['s']       = 'working';
+        $q[$idx]['started'] = time(); // v3.4.8: de aici se măsoară „prea vechi = reia"
         $this->save_queue($q);
 
         $result = $this->process_item($q[$idx]);
@@ -483,6 +498,23 @@ class HZ_Bulk {
             $postarr['post_date']     = $rand['local'];
             $postarr['post_date_gmt'] = $rand['gmt'];
         }
+        // v3.4.8 — ULTIMA BARIERĂ CONTRA DUBLURILOR.
+        // Verificarea de la adăugarea în coadă nu ajută aici: între timp poate să fi
+        // apărut un articol cu același titlu — inclusiv o încercare ANTERIOARĂ a
+        // noastră, dacă itemul a rămas „working" și a fost reluat (lock expirat pe o
+        // generare lentă sau transient pierdut la golirea cache-ului de obiecte).
+        // Generarea durează 1-3 minute, iar articolul se insera abia la final, deci
+        // fiecare reluare crea încă o copie. Acum ne oprim înainte de inserare.
+        $existing = $this->existing_post_id($title);
+        if ($existing) {
+            $item['s']       = 'done';
+            $item['post_id'] = $existing;
+            $item['cost']    = $cost;
+            $item['err']     = '';
+            $item['note']    = 'Exista deja un articol cu acest titlu - duplicat evitat';
+            return $item;
+        }
+
         $post_id = wp_insert_post(wp_slash($postarr), true);
 
         if (is_wp_error($post_id)) {
