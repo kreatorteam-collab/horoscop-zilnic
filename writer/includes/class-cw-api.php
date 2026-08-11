@@ -11,6 +11,9 @@ class CW_API {
     const ENDPOINT        = 'https://api.anthropic.com/v1/messages';
     const VERSION         = '2023-06-01';
     const OPENAI_ENDPOINT = 'https://api.openai.com/v1/chat/completions';
+    // Căutarea web la OpenAI merge DOAR pe Responses API (Chat Completions respinge
+    // orice parametru de search — verificat live pe gpt-5.4-mini: „Unknown parameter").
+    const OPENAI_RESPONSES = 'https://api.openai.com/v1/responses';
 
     /* ---- Chei ---- */
 
@@ -72,6 +75,45 @@ class CW_API {
 
     /* ---- Payload Anthropic (Messages API) ---- */
 
+    /* ---- Căutare web (informații la zi) ---- */
+
+    /**
+     * E pornită căutarea web pentru acest apel? Implicit OPRITĂ per site
+     * (`cw_web_search`), dar filtrul `cw_web_search` permite pornirea punctuală —
+     * așa o cere modulul Articole Bulk pentru loturile marcate „la zi".
+     *
+     * NU merge pe streaming (editorul): acolo rămâne apelul clasic.
+     */
+    public static function web_search_on($model_id = '') {
+        return (int) apply_filters('cw_web_search', (int) get_option('cw_web_search', 0), $model_id) === 1;
+    }
+
+    /**
+     * Rulează un apel cu căutarea web FORȚAT oprită. Folosit acolo unde căutarea n-are
+     * ce căuta și ar fi bani aruncați: micro-apelurile (interogarea de imagini, titluri,
+     * cuvinte cheie), conținutul zilnic (horoscop, vreme — au sursele lor) și refresh-ul
+     * pe articolele existente (zeci de mii de articole).
+     */
+    public static function no_web(callable $fn) {
+        $off = function () { return 0; };
+        add_filter('cw_web_search', $off, 99);
+        try {
+            return $fn();
+        } finally {
+            remove_filter('cw_web_search', $off, 99);
+        }
+    }
+
+    /** Câte căutări cel mult într-un apel (Anthropic le limitează explicit). */
+    public static function web_search_max() {
+        return max(1, min(10, (int) get_option('cw_web_search_max', 3)));
+    }
+
+    /** Cost estimat per căutare (se taxează per apel, nu în tokeni). */
+    public static function web_search_cost() {
+        return max(0, (float) get_option('cw_web_search_cost', 0.01));
+    }
+
     public static function build_payload($model_id, $user_prompt, $stream = false, $max_tokens = null) {
         $m = CW_Models::get($model_id);
         if (!$m) { $model_id = CW_Models::provider_default('anthropic'); $m = CW_Models::get($model_id); }
@@ -117,6 +159,17 @@ class CW_API {
             $effort = apply_filters('cw_effort', get_option('cw_effort', 'medium'), $model_id);
             if (!in_array($effort, array('low', 'medium', 'high'), true)) { $effort = 'medium'; }
             $payload['output_config'] = array('effort' => $effort);
+        }
+
+        // Căutare web: unealtă server-side Anthropic. Blocurile suplimentare din
+        // răspuns (server_tool_use / web_search_tool_result) sunt ignorate de parser,
+        // care ia doar blocurile de tip „text".
+        if (!$stream && self::web_search_on($model_id)) {
+            $payload['tools'] = array(array(
+                'type'     => 'web_search_20250305',
+                'name'     => 'web_search',
+                'max_uses' => self::web_search_max(),
+            ));
         }
 
         if ($stream) {
@@ -168,6 +221,101 @@ class CW_API {
         }
 
         return $payload;
+    }
+
+    /**
+     * Generare OpenAI CU căutare web, prin Responses API.
+     *
+     * Diferă de Chat Completions: promptul merge în `input`, system-ul în
+     * `instructions`, iar răspunsul vine ca listă `output[]` cu blocuri
+     * `web_search_call` (căutările făcute) și `message` (textul, cu citări în
+     * `annotations`). Nu facem continuare prin prefill aici — dăm de la început
+     * `max_output_tokens` generos, fiindcă un al doilea apel ar relua căutările.
+     */
+    private static function generate_openai_web($model_id, $user_prompt, $max_tokens = null) {
+        if ($max_tokens === null) { $max_tokens = (int) get_option('cw_max_tokens', 8000); }
+        $max_tokens = max(512, min(16000, (int) $max_tokens));
+
+        // $user_prompt poate fi array de mesaje (continuare) — aici îl aplatizăm.
+        $input = is_array($user_prompt)
+            ? implode("\n\n", array_map(function ($m) {
+                return is_array($m) && isset($m['content']) ? (string) $m['content'] : (string) $m;
+            }, $user_prompt))
+            : (string) $user_prompt;
+
+        $payload = array(
+            'model'             => $model_id,
+            'input'             => $input,
+            'tools'             => array(array('type' => 'web_search')),
+            'max_output_tokens' => $max_tokens,
+        );
+        $system = self::system_prompt();
+        if ($system !== '') { $payload['instructions'] = $system; }
+
+        $response = wp_remote_post(self::OPENAI_RESPONSES, array(
+            'headers' => self::openai_headers(),
+            'body'    => wp_json_encode($payload),
+            'timeout' => 300, // căutările adaugă zeci de secunde
+        ));
+
+        if (is_wp_error($response)) {
+            return new WP_Error('cw_http', __('Eroare de conexiune: ', 'claude-writer') . $response->get_error_message());
+        }
+
+        $code = wp_remote_retrieve_response_code($response);
+        $body = json_decode(wp_remote_retrieve_body($response), true);
+
+        if ($code !== 200 || !is_array($body)) {
+            $msg = is_array($body) && isset($body['error']['message'])
+                ? $body['error']['message']
+                : __('Răspuns invalid de la API.', 'claude-writer');
+            self::maybe_credit_alert('openai', $msg);
+            return new WP_Error('cw_api', sprintf(__('Eroare API (%d): %s', 'claude-writer'), $code, $msg));
+        }
+
+        $text     = '';
+        $searches = 0;
+        foreach ((isset($body['output']) && is_array($body['output'])) ? $body['output'] : array() as $item) {
+            $type = isset($item['type']) ? $item['type'] : '';
+            if ($type === 'web_search_call') { $searches++; continue; }
+            if ($type === 'message' && isset($item['content']) && is_array($item['content'])) {
+                foreach ($item['content'] as $c) {
+                    if (isset($c['text'])) { $text .= $c['text']; }
+                }
+            }
+        }
+
+        $usage = self::normalize_responses_usage(isset($body['usage']) ? $body['usage'] : array());
+        $cost  = CW_Usage::log($model_id, $usage);
+        if ($searches > 0) {
+            $cost += CW_Usage::log_extra($model_id, $searches * self::web_search_cost());
+        }
+
+        // La Responses API, tokenii de raționament intră în max_output_tokens: dacă
+        // răspunsul iese „incomplete", textul e tăiat — o raportăm, să se vadă în coadă.
+        $incomplete = (isset($body['status']) && $body['status'] === 'incomplete');
+
+        return array(
+            'text'       => trim($text),
+            'usage'      => $usage,
+            'cost'       => $cost,
+            'searches'   => $searches,
+            'incomplete' => $incomplete,
+        );
+    }
+
+    /** Usage-ul Responses API -> formatul intern (input/output, cache separat). */
+    public static function normalize_responses_usage($usage) {
+        $in     = isset($usage['input_tokens']) ? (int) $usage['input_tokens'] : 0;
+        $out    = isset($usage['output_tokens']) ? (int) $usage['output_tokens'] : 0;
+        $cached = isset($usage['input_tokens_details']['cached_tokens'])
+            ? (int) $usage['input_tokens_details']['cached_tokens'] : 0;
+        return array(
+            'input_tokens'                => max(0, $in - $cached),
+            'output_tokens'               => $out,
+            'cache_read_input_tokens'     => $cached,
+            'cache_creation_input_tokens' => 0,
+        );
     }
 
     /** Normalizează usage-ul OpenAI la formatul intern (cel Anthropic). */
@@ -314,6 +462,13 @@ class CW_API {
             $cost      += CW_Usage::log($model_id, $usage);
             $full      .= $text;
 
+            // Căutările web se taxează per apel, nu în tokeni.
+            $searches = isset($usage['server_tool_use']['web_search_requests'])
+                ? (int) $usage['server_tool_use']['web_search_requests'] : 0;
+            if ($searches > 0) {
+                $cost += CW_Usage::log_extra($model_id, $searches * self::web_search_cost());
+            }
+
             $stop = isset($body['stop_reason']) ? $body['stop_reason'] : '';
             if ($stop !== 'max_tokens') {
                 break; // articol terminat natural
@@ -336,6 +491,11 @@ class CW_API {
     }
 
     private static function generate_openai($model_id, $user_prompt, $max_tokens = null) {
+        // Cu căutare web mergem pe Responses API (singurul care acceptă unealta).
+        if (self::web_search_on($model_id)) {
+            return self::generate_openai_web($model_id, $user_prompt, $max_tokens);
+        }
+
         // Aceeași garanție de articol complet: dacă răspunsul se taie la limita de tokeni
         // (finish_reason=length), cerem continuarea. 1 apel inițial + maximum 2 continuări.
         $base_messages = is_array($user_prompt)

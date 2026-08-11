@@ -168,7 +168,10 @@ class HZ_Weather {
         }
         $override = function () use ($system) { return $system; };
         add_filter('cw_system_prompt', $override);
-        $result = CW_API::generate($model, $prompt);
+        // Datele meteo vin din XML-ul ANM — căutarea web n-ar aduce nimic în plus.
+        $result = CW_API::no_web(function () use ($model, $prompt) {
+            return CW_API::generate($model, $prompt);
+        });
         remove_filter('cw_system_prompt', $override);
 
         if (is_wp_error($result)) {

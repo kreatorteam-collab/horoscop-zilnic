@@ -96,6 +96,8 @@ class HZ_Remote {
             'ai_model_set'    => (string) get_option('cw_default_model', ''),
             'ai_month_cost'   => class_exists('CW_Usage') ? round((float) CW_Usage::month_cost(), 4) : 0,
             'ai_month_limit'  => (float) get_option('cw_monthly_cost_limit', 0),
+            'web_search'      => (int) get_option('cw_web_search', 0),
+            'web_search_max'  => (int) get_option('cw_web_search_max', 3),
             'models'          => class_exists('CW_Models') ? self::model_list() : array(),
             'magnific_key'    => HZ_Magnific::has_key(),
             // Amprenta cheii Magnific (acelasi hash ca in contorul central) — panoul
@@ -168,6 +170,8 @@ class HZ_Remote {
             'batch'  => isset($data['batch']) ? (string) $data['batch'] : '',
             'length' => isset($data['length']) ? (int) $data['length'] : 0,
             'images' => isset($data['images']) ? $data['images'] : '',
+            // Căutare web pentru lotul ăsta: absent = setarea site-ului.
+            'web'    => isset($data['web']) ? $data['web'] : '',
             // Categoria lipsă se creează DOAR dacă panoul cere explicit.
             'create_category' => !empty($data['create_category']),
         ));
@@ -270,8 +274,16 @@ class HZ_Remote {
             }
         }
 
+        // Căutarea web e un comutator: 0/1 explicit (nu „gol = neatins", altfel n-ai
+        // cum să o oprești de la distanță).
+        if (isset($set['web_search']) && $set['web_search'] !== '') {
+            update_option('cw_web_search', (int) !!$set['web_search'], 'no');
+            $changed[] = 'web_search';
+        }
+
         $numbers = array(
             'monthly_limit'        => array('cw_monthly_cost_limit', 0, 10000),
+            'web_search_max'       => array('cw_web_search_max', 1, 10),
             'magnific_daily_limit' => array('hzb_daily_limit', 1, 1000),
             'images'               => array('hzb_images', 0, 3),
             'length'               => array('hzb_length', 300, 4000),
@@ -300,6 +312,7 @@ class HZ_Remote {
                 'ai_model_set'   => (string) get_option('cw_default_model', ''),
                 'ai_model'       => CW_API::resolve_model(''),
                 'ai_month_limit' => (float) get_option('cw_monthly_cost_limit', 0),
+                'web_search'     => (int) get_option('cw_web_search', 0),
                 'magnific_key'   => HZ_Magnific::has_key(),
                 'magnific_hash'  => HZ_Magnific::key_hash(),
                 'magnific_limit' => HZ_Magnific::daily_limit(),
@@ -313,7 +326,7 @@ class HZ_Remote {
         if ($data instanceof WP_REST_Response) { return $data; }
 
         $action = isset($data['action']) ? sanitize_key((string) $data['action']) : '';
-        if (!in_array($action, array('start', 'stop', 'retry', 'clear'), true)) {
+        if (!in_array($action, array('start', 'stop', 'retry', 'clear', 'unlock'), true)) {
             return new WP_REST_Response(array('error' => 'bad_action'), 400);
         }
         $bulk = new HZ_Bulk();

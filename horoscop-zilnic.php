@@ -3,7 +3,7 @@
  * Plugin Name: AI Writer & Conținut Zilnic
  * Plugin URI: https://targetseo.ro/
  * Description: Generează și rescrie articole SEO direct în editor (GPT-5.6 și Claude), creează articole în bulk cu imagini de stock relevante (Magnific), împrospătează articolele existente cu întrebări frecvente și idei-cheie (schema FAQPage) și publică automat conținut zilnic: horoscopul cu toate cele 12 zodii și vremea pe regiuni (date oficiale ANM). Un singur plugin: chei API, costuri, editor, bulk, refresh, horoscop și vreme.
- * Version: 3.6.0
+ * Version: 3.7.0
  * Author: Eduard / TargetSEO
  * Text Domain: horoscop-zilnic
  * Requires at least: 5.6
@@ -15,7 +15,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('HZ_VERSION', '3.6.0');
+define('HZ_VERSION', '3.7.0');
 define('HZ_PATH', plugin_dir_path(__FILE__));
 define('HZ_URL', plugin_dir_url(__FILE__));
 
@@ -64,6 +64,19 @@ add_action('init', function () {
     }
     update_option('hz_cw_removed', 1); // autoload yes: verificarea să nu coste un query
 }, 99);
+
+/**
+ * Curățenie v3.7.0: sonda temporară folosită ca să aflăm ce formă de căutare web
+ * acceptă API-urile (`includes/class-hz-probe.php`) nu mai face parte din plugin.
+ * Upgrade-ul copiază peste fișiere, NU șterge ce a dispărut din pachet — deci pe
+ * site-ul unde a fost instalată o ștergem noi, o singură dată.
+ */
+add_action('init', function () {
+    if (get_option('hz_probe_removed')) { return; }
+    $f = HZ_PATH . 'includes/class-hz-probe.php';
+    if (file_exists($f)) { @unlink($f); }
+    update_option('hz_probe_removed', 1, 'no');
+}, 98);
 
 function hz_delete_dir($dir) {
     if (!is_dir($dir)) { return; }

@@ -72,6 +72,9 @@ class CW_Admin {
             'cw_max_tokens'         => 'absint',
             'cw_stream_enabled'     => 'absint',
             'cw_monthly_cost_limit' => 'cw_sanitize_float',
+            'cw_web_search'         => 'absint',
+            'cw_web_search_max'     => 'absint',
+            'cw_web_search_cost'    => 'cw_sanitize_float',
             'cw_system_prompt'      => 'cw_sanitize_prompt',
             'cw_article_prompt'     => 'cw_sanitize_prompt',
             'cw_rewrite_prompt'     => 'cw_sanitize_prompt',
@@ -288,6 +291,18 @@ class CW_Admin {
                             <label><input type="checkbox" name="cw_stream_enabled" value="1" <?php checked(1, (int) get_option('cw_stream_enabled', 0)); ?> /> <?php esc_html_e('Activează streaming (text afișat în timp real)', 'claude-writer'); ?></label>
                         </p>
                         
+                        <p>
+                            <label><input type="checkbox" name="cw_web_search" value="1" <?php checked(1, (int) get_option('cw_web_search', 0)); ?> /> <?php esc_html_e('Caută pe web înainte de a scrie (informații la zi)', 'claude-writer'); ?></label>
+                            <span class="cw-muted"><?php esc_html_e('Modelul face căutări reale și citează surse — util pentru subiecte care depind de „acum" (prețuri, legislație, noutăți). Costă în plus ~$0.01 per căutare, peste tokeni, și adaugă zeci de secunde. NU se aplică pe streaming (butoanele din editor). Poate fi pornit și doar pentru anumite loturi, din panoul central.', 'claude-writer'); ?></span>
+                        </p>
+                        <p>
+                            <label class="cw-label"><?php esc_html_e('Căutări maxime per articol', 'claude-writer'); ?></label>
+                            <input type="number" name="cw_web_search_max" class="widefat" min="1" max="10" step="1" value="<?php echo esc_attr(get_option('cw_web_search_max', 3)); ?>" />
+                        </p>
+                        <p>
+                            <label class="cw-label"><?php esc_html_e('Cost estimat per căutare ($) — doar pentru evidența costurilor', 'claude-writer'); ?></label>
+                            <input type="number" name="cw_web_search_cost" class="widefat" min="0" step="0.001" value="<?php echo esc_attr(get_option('cw_web_search_cost', 0.01)); ?>" />
+                        </p>
                         <p>
                             <label class="cw-label"><?php esc_html_e('Limită lunară de cheltuieli ($, 0 = fără limită)', 'claude-writer'); ?></label>
                             <input type="number" name="cw_monthly_cost_limit" class="widefat" min="0" step="1" value="<?php echo esc_attr(get_option('cw_monthly_cost_limit', 0)); ?>" />

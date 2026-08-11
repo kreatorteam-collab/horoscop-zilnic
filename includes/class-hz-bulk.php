@@ -143,6 +143,8 @@ class HZ_Bulk {
         $img    = isset($opts['images']) && $opts['images'] !== '' ? max(0, min(3, (int) $opts['images'])) : null;
         $mkcat  = !empty($opts['create_category']);
         $created = array();
+        // Căutare web per lot: null = las setarea site-ului, 0/1 = o forțez.
+        $web = (isset($opts['web']) && $opts['web'] !== '' && $opts['web'] !== null) ? (int) !!$opts['web'] : null;
 
         $q     = $this->queue();
         $known = array();
@@ -189,6 +191,7 @@ class HZ_Bulk {
                 'b'       => $batch,
                 'len'     => $len > 0 ? max(300, $len) : 0,
                 'img'     => $img,
+                'web'     => $web,
                 'lnk'     => array('total' => count($links), 'done' => 0, 'forced' => 0),
             );
             $added++;
@@ -273,6 +276,13 @@ class HZ_Bulk {
             'stopped'      => (int) get_option('hzb_stopped', 0),
             'paused'       => (string) get_option('hzb_paused_reason', ''),
             'gap'          => (int) get_option('hzb_gap', 120),
+            // Lock ținut, dar nimic „în lucru" = rulare moartă; panoul oferă deblocarea.
+            'locked'       => get_transient(self::LOCK) ? 1 : 0,
+            // Când e programată următoarea rulare (0 = nicio rulare programată — atunci
+            // coada stă pe loc, oricâte articole ar avea).
+            'next_run'     => (int) wp_next_scheduled(self::HOOK),
+            'now'          => time(),
+            'cron_off'     => (defined('DISABLE_WP_CRON') && DISABLE_WP_CRON) ? 1 : 0,
         );
     }
 
@@ -305,6 +315,23 @@ class HZ_Bulk {
                 $this->save_queue($q);
                 delete_option('hzb_paused_reason');
                 return 'Coada a fost golită.';
+
+            // Lock-ul e un transient de 30 min pus la începutul fiecărui articol. Dacă
+            // rularea moare (timeout PHP, worker ucis), lock-ul rămâne și coada stă pe
+            // loc, aparent fără motiv — asta îl scoate și repornește procesarea.
+            case 'unlock':
+                delete_transient(self::LOCK);
+                $q = $this->queue();
+                $n = 0;
+                foreach ($q as &$item) {
+                    if ($item['s'] === 'working') { $item['s'] = 'pending'; $n++; }
+                }
+                unset($item);
+                if ($n > 0) { $this->save_queue($q); }
+                $this->kick();
+                return $n > 0
+                    ? sprintf('Coadă deblocată; %d articole rămase „în lucru" au fost repuse la rând.', $n)
+                    : 'Coadă deblocată.';
         }
         return '';
     }
@@ -619,6 +646,16 @@ class HZ_Bulk {
         if (!empty($links) && class_exists('HZ_Links')) {
             $brief .= HZ_Links::prompt_hint($links);
         }
+        // Cu căutare web îi spunem ce zi e (altfel „acum" înseamnă data antrenamentului)
+        // și îi cerem explicit să nu inventeze cifre.
+        $web_on = (isset($item['web']) && $item['web'] !== null && $item['web'] !== '')
+            ? (int) $item['web']
+            : (int) get_option('cw_web_search', 0);
+        if ($web_on === 1) {
+            $brief .= "\n\nAstăzi este " . wp_date('j F Y') . ". Caută informații actuale înainte să scrii, "
+                . "folosește DOAR date verificate în surse și nu inventa cifre, prețuri sau termene. "
+                . "Când citezi o cifră recentă, menționează în text sursa (numele publicației).";
+        }
         $words = (isset($item['len']) && (int) $item['len'] > 0)
             ? (int) $item['len']
             : (int) get_option('hzb_length', 1000);
@@ -629,13 +666,26 @@ class HZ_Bulk {
             $tpl
         );
 
+        // Căutare web doar pentru ARTICOL (nu și pentru micro-apelul de traducere a
+        // interogării de imagini), și doar dacă lotul a cerut-o explicit.
+        $web = (isset($item['web']) && $item['web'] !== null && $item['web'] !== '') ? (int) $item['web'] : null;
+        $web_filter = null;
+        if ($web !== null) {
+            $web_filter = function () use ($web) { return $web; };
+            add_filter('cw_web_search', $web_filter, 99);
+        }
+
         $result = CW_API::generate($model, $prompt);
+
+        if ($web_filter) { remove_filter('cw_web_search', $web_filter, 99); }
+
         if (is_wp_error($result)) {
             $item['s']   = 'error';
             $item['err'] = $result->get_error_message();
             return $item;
         }
         $cost += (float) $result['cost'];
+        $searches = isset($result['searches']) ? (int) $result['searches'] : 0;
 
         $content = $this->clean_html($result['text']);
         if (strlen($content) < 500) {
@@ -734,6 +784,12 @@ class HZ_Bulk {
         if ($link_note !== '') {
             $item['note'] = $link_note . ' · ' . $item['note'];
         }
+        if ($searches > 0) {
+            $item['note'] = $searches . ' căutări web · ' . $item['note'];
+        }
+        if (!empty($result['incomplete'])) {
+            $item['note'] = 'ATENȚIE: text tăiat la limita de tokeni · ' . $item['note'];
+        }
         return $item;
     }
 
@@ -759,7 +815,10 @@ class HZ_Bulk {
             return $out;
         }
 
-        $qr = CW_API::generate($model, 'Translate this Romanian article title into a short English stock photo search query (3-5 generic, visual keywords). Reply with ONLY the keywords, nothing else: ' . $title, 100);
+        // Fără căutare web aici: e un micro-apel de traducere, n-are nevoie de internet.
+        $qr = CW_API::no_web(function () use ($model, $title) {
+            return CW_API::generate($model, 'Translate this Romanian article title into a short English stock photo search query (3-5 generic, visual keywords). Reply with ONLY the keywords, nothing else: ' . $title, 100);
+        });
         $query = is_wp_error($qr) ? '' : trim(preg_replace('/[^\p{L}\p{N} \-]/u', '', $qr['text']));
         if (!is_wp_error($qr)) { $out['cost'] += (float) $qr['cost']; }
         if ($query === '') { $query = $title; }

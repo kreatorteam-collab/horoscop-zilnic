@@ -38,6 +38,30 @@ class CW_Usage {
         return $cost;
     }
 
+    /**
+     * Cost care NU vine din tokeni: căutările web sunt taxate per apel, separat de
+     * tokeni. Îl adăugăm în aceleași totaluri, ca limita lunară să-l vadă și ea.
+     */
+    public static function log_extra($model_id, $cost) {
+        $cost = (float) $cost;
+        if ($cost <= 0) { return 0.0; }
+
+        update_option('cw_cost_total', round((float) get_option('cw_cost_total', 0) + $cost, 6));
+
+        $month   = date('Y-m');
+        $monthly = get_option('cw_cost_monthly', array());
+        if (!is_array($monthly)) { $monthly = array(); }
+        $monthly[$month] = round((isset($monthly[$month]) ? (float) $monthly[$month] : 0) + $cost, 6);
+        update_option('cw_cost_monthly', $monthly);
+
+        $by = get_option('cw_usage_by_model', array());
+        if (is_array($by) && isset($by[$model_id])) {
+            $by[$model_id]['cost'] = round($by[$model_id]['cost'] + $cost, 6);
+            update_option('cw_usage_by_model', $by);
+        }
+        return $cost;
+    }
+
     public static function month_cost($month = null) {
         $month   = $month ? $month : date('Y-m');
         $monthly = get_option('cw_cost_monthly', array());

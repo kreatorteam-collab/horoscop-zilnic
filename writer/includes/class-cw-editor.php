@@ -160,9 +160,15 @@ class CW_Editor {
         $prompt = self::build_prompt($action, $subject, $content, $length);
 
         // Titlu/cuvinte cheie au nevoie de puțini tokeni.
-        $max = in_array($action, array('title', 'keywords'), true) ? 256 : null;
+        $short = in_array($action, array('title', 'keywords'), true);
+        $max   = $short ? 256 : null;
 
-        $result = CW_API::generate($model, $prompt, $max);
+        // Titlurile și cuvintele cheie se scot din textul existent — fără căutare web
+        // (ar plăti o căutare pentru un răspuns de 10 cuvinte). Articolul și rescrierea
+        // respectă setarea site-ului.
+        $result = $short
+            ? CW_API::no_web(function () use ($model, $prompt, $max) { return CW_API::generate($model, $prompt, $max); })
+            : CW_API::generate($model, $prompt, $max);
         if (is_wp_error($result)) {
             wp_send_json_error(array('message' => $result->get_error_message()));
         }

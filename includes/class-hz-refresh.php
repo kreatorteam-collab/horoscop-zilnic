@@ -437,7 +437,11 @@ class HZ_Refresh {
 
         add_filter('cw_system_prompt', $filter, 99);
         add_filter('cw_effort', $effort, 99);
-        $res = CW_API::generate($model, $prompt, 4000);
+        // Fără căutare web: lucrăm pe textul articolului existent, iar pe zeci de mii
+        // de articole căutările ar costa mai mult decât toată operațiunea.
+        $res = CW_API::no_web(function () use ($model, $prompt) {
+            return CW_API::generate($model, $prompt, 4000);
+        });
         remove_filter('cw_effort', $effort, 99);
         remove_filter('cw_system_prompt', $filter, 99);
 
