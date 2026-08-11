@@ -121,8 +121,12 @@ class HZ_Bulk {
      * Adaugă articole în coadă. Folosit și de formularul din admin, și de comanda
      * venită prin REST din panoul central (app.targetseo.ro).
      *
-     * $rows: array de array('title', 'cat' => int, 'links' => array(anchor/url/rel))
-     * $opts: status, model, extra, batch, length, images
+     * $rows: array de array('title', 'cat' => int, 'cat_name' => string, 'links' => array(anchor/url/rel))
+     * $opts: status, model, extra, batch, length, images, create_category
+     *
+     * Categoria: ID valid > categorie cu acel NUME > (dacă e cerut) creare > default site.
+     * Numele contează pentru comenzile venite din panoul central: acolo alegi „Articole
+     * sponsorizate" pentru tot lotul, iar ID-ul diferă de la site la site.
      *
      * Anti-dubluri: sărim titlurile deja în coadă SAU care au deja un articol pe site
      * (lista poate fi lipită de două ori sau poate conține subiecte deja scrise).
@@ -137,6 +141,8 @@ class HZ_Bulk {
         $batch  = isset($opts['batch']) ? substr(preg_replace('/[^a-zA-Z0-9_\-]/', '', (string) $opts['batch']), 0, 40) : '';
         $len    = isset($opts['length']) ? (int) $opts['length'] : 0;
         $img    = isset($opts['images']) && $opts['images'] !== '' ? max(0, min(3, (int) $opts['images'])) : null;
+        $mkcat  = !empty($opts['create_category']);
+        $created = array();
 
         $q     = $this->queue();
         $known = array();
@@ -166,7 +172,12 @@ class HZ_Bulk {
             $q[] = array(
                 't'       => $title,
                 's'       => 'pending',
-                'cat'     => isset($row['cat']) ? (int) $row['cat'] : 0,
+                'cat'     => $this->resolve_category(
+                    isset($row['cat']) ? $row['cat'] : 0,
+                    isset($row['cat_name']) ? $row['cat_name'] : '',
+                    $mkcat,
+                    $created
+                ),
                 'st'      => $status,
                 'model'   => $model,
                 'extra'   => $extra,
@@ -186,7 +197,42 @@ class HZ_Bulk {
         $this->save_queue($q);
         if ($added > 0) { $this->kick(); }
 
-        return array('added' => $added, 'skipped' => $skipped, 'queued' => count($q));
+        return array(
+            'added'   => $added,
+            'skipped' => $skipped,
+            'queued'  => count($q),
+            'created_categories' => array_keys($created),
+        );
+    }
+
+    /**
+     * ID-ul categoriei cerute: ID valid > categorie cu acel nume > creare (dacă e
+     * permisă) > 0 (categoria implicită a site-ului).
+     *
+     * Numele e sursa de adevăr pentru comenzile din panoul central: „Articole
+     * sponsorizate" are alt ID pe fiecare site, iar pe site-urile noi nici nu există.
+     */
+    private function resolve_category($id, $name, $create, &$created) {
+        $id = (int) $id;
+        if ($id > 0 && get_term($id, 'category') instanceof WP_Term) {
+            return $id;
+        }
+        $name = trim(wp_strip_all_tags((string) $name));
+        if ($name === '') { return 0; }
+
+        $term = get_term_by('name', $name, 'category');
+        if ($term instanceof WP_Term) { return (int) $term->term_id; }
+
+        if (!$create) { return 0; }
+
+        $new = wp_insert_term($name, 'category');
+        if (is_wp_error($new)) {
+            // Cursă cu alt request sau nume deja existent sub alt părinte.
+            $exists = term_exists($name, 'category');
+            return is_array($exists) ? (int) $exists['term_id'] : 0;
+        }
+        $created[$name] = 1;
+        return (int) $new['term_id'];
     }
 
     /**

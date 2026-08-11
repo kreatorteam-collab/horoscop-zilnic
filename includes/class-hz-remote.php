@@ -133,9 +133,10 @@ class HZ_Remote {
         foreach ($items as $it) {
             if (!is_array($it)) { continue; }
             $rows[] = array(
-                'title' => isset($it['title']) ? sanitize_text_field((string) $it['title']) : '',
-                'cat'   => isset($it['category_id']) ? (int) $it['category_id'] : 0,
-                'links' => isset($it['links']) ? $it['links'] : array(),
+                'title'    => isset($it['title']) ? sanitize_text_field((string) $it['title']) : '',
+                'cat'      => isset($it['category_id']) ? (int) $it['category_id'] : 0,
+                'cat_name' => isset($it['category_name']) ? sanitize_text_field((string) $it['category_name']) : '',
+                'links'    => isset($it['links']) ? $it['links'] : array(),
             );
         }
 
@@ -157,6 +158,8 @@ class HZ_Remote {
             'batch'  => isset($data['batch']) ? (string) $data['batch'] : '',
             'length' => isset($data['length']) ? (int) $data['length'] : 0,
             'images' => isset($data['images']) ? $data['images'] : '',
+            // Categoria lipsă se creează DOAR dacă panoul cere explicit.
+            'create_category' => !empty($data['create_category']),
         ));
 
         return array(
@@ -165,6 +168,7 @@ class HZ_Remote {
             'skipped' => (int) $res['skipped'],
             'queued'  => (int) $res['queued'],
             'stopped' => (int) get_option('hzb_stopped', 0),
+            'created_categories' => $res['created_categories'],
         );
     }
 
