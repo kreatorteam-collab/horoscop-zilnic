@@ -97,32 +97,76 @@ class HZ_Bulk {
 
         $cat    = isset($_POST['category']) ? (int) $_POST['category'] : 0;
         $status = isset($_POST['status']) ? sanitize_text_field(wp_unslash($_POST['status'])) : 'draft';
-        if (!in_array($status, array('publish', 'draft', 'pending'), true)) { $status = 'draft'; }
         $model  = isset($_POST['model']) ? sanitize_text_field(wp_unslash($_POST['model'])) : '';
         $extra  = isset($_POST['extra']) ? sanitize_textarea_field(wp_unslash($_POST['extra'])) : '';
-        $extra  = mb_substr($extra, 0, 2000);
 
-        // Anti-dubluri: sărim titlurile care sunt deja în coadă SAU au deja un
-        // articol pe site (publicat/ciornă/programat) — lista poate fi lipită de
-        // două ori sau poate conține subiecte deja scrise.
-        $q = $this->queue();
+        $rows = array();
+        foreach ($titles as $t) {
+            $rows[] = array('title' => $t, 'cat' => $cat);
+        }
+        $res = $this->add_items($rows, array(
+            'status' => $status,
+            'model'  => $model,
+            'extra'  => $extra,
+        ));
+
+        $msg = sprintf('%d articole adăugate în coadă.', $res['added']);
+        if ($res['skipped'] > 0) {
+            $msg .= sprintf(' %d sărite (deja în coadă sau articol existent cu același titlu).', $res['skipped']);
+        }
+        wp_send_json_success(array('message' => $msg));
+    }
+
+    /**
+     * Adaugă articole în coadă. Folosit și de formularul din admin, și de comanda
+     * venită prin REST din panoul central (app.targetseo.ro).
+     *
+     * $rows: array de array('title', 'cat' => int, 'links' => array(anchor/url/rel))
+     * $opts: status, model, extra, batch, length, images
+     *
+     * Anti-dubluri: sărim titlurile deja în coadă SAU care au deja un articol pe site
+     * (lista poate fi lipită de două ori sau poate conține subiecte deja scrise).
+     *
+     * @return array array('added','skipped','queued')
+     */
+    public function add_items($rows, $opts = array()) {
+        $status = isset($opts['status']) ? (string) $opts['status'] : 'draft';
+        if (!in_array($status, array('publish', 'draft', 'pending'), true)) { $status = 'draft'; }
+        $model  = isset($opts['model']) ? (string) $opts['model'] : '';
+        $extra  = mb_substr(isset($opts['extra']) ? (string) $opts['extra'] : '', 0, 2000);
+        $batch  = isset($opts['batch']) ? substr(preg_replace('/[^a-zA-Z0-9_\-]/', '', (string) $opts['batch']), 0, 40) : '';
+        $len    = isset($opts['length']) ? (int) $opts['length'] : 0;
+        $img    = isset($opts['images']) && $opts['images'] !== '' ? max(0, min(3, (int) $opts['images'])) : null;
+
+        $q     = $this->queue();
         $known = array();
         foreach ($q as $item) {
             $known[$this->norm_title($item['t'])] = 1;
         }
+
         $added   = 0;
         $skipped = 0;
-        foreach ($titles as $t) {
-            $key = $this->norm_title($t);
-            if (isset($known[$key]) || $this->post_title_exists($t)) {
+        foreach ($rows as $row) {
+            $title = isset($row['title']) ? trim((string) $row['title']) : '';
+            if ($title === '' || mb_strlen($title) < 3) { $skipped++; continue; }
+            $title = mb_substr($title, 0, 200);
+
+            $key = $this->norm_title($title);
+            if (isset($known[$key]) || $this->post_title_exists($title)) {
                 $skipped++;
                 continue;
             }
             $known[$key] = 1;
+
+            $links = array();
+            if (!empty($row['links']) && class_exists('HZ_Links')) {
+                $links = HZ_Links::sanitize_list($row['links']);
+            }
+
             $q[] = array(
-                't'       => $t,
+                't'       => $title,
                 's'       => 'pending',
-                'cat'     => $cat,
+                'cat'     => isset($row['cat']) ? (int) $row['cat'] : 0,
                 'st'      => $status,
                 'model'   => $model,
                 'extra'   => $extra,
@@ -130,17 +174,93 @@ class HZ_Bulk {
                 'err'     => '',
                 'note'    => '',
                 'cost'    => 0.0,
+                'links'   => $links,
+                'b'       => $batch,
+                'len'     => $len > 0 ? max(300, $len) : 0,
+                'img'     => $img,
+                'lnk'     => array('total' => count($links), 'done' => 0, 'forced' => 0),
             );
             $added++;
         }
+
         $this->save_queue($q);
         if ($added > 0) { $this->kick(); }
 
-        $msg = sprintf('%d articole adăugate în coadă.', $added);
-        if ($skipped > 0) {
-            $msg .= sprintf(' %d sărite (deja în coadă sau articol existent cu același titlu).', $skipped);
+        return array('added' => $added, 'skipped' => $skipped, 'queued' => count($q));
+    }
+
+    /**
+     * Starea articolelor dintr-un lot trimis din panoul central + starea coadei.
+     * Fără $batch, raportează toată coada.
+     */
+    public function batch_status($batch = '', $with_items = true) {
+        $items   = array();
+        $pending = 0;
+        foreach ($this->queue() as $item) {
+            if ($item['s'] === 'pending' || $item['s'] === 'working') { $pending++; }
+            if (!$with_items) { continue; }
+            if ($batch !== '' && (!isset($item['b']) || $item['b'] !== $batch)) { continue; }
+            $pid = (int) $item['post_id'];
+            $lnk = isset($item['lnk']) && is_array($item['lnk']) ? $item['lnk'] : array();
+            $items[] = array(
+                'title'       => (string) $item['t'],
+                'status'      => (string) $item['s'],
+                'post_id'     => $pid,
+                'url'         => $pid ? get_permalink($pid) : '',
+                'edit_url'    => $pid ? get_edit_post_link($pid, 'raw') : '',
+                'error'       => (string) $item['err'],
+                'note'        => (string) $item['note'],
+                'cost'        => (float) $item['cost'],
+                'links_total' => (int) (isset($lnk['total']) ? $lnk['total'] : 0),
+                'links_done'  => (int) (isset($lnk['done']) ? $lnk['done'] : 0),
+                'links_forced'=> (int) (isset($lnk['forced']) ? $lnk['forced'] : 0),
+            );
         }
-        wp_send_json_success(array('message' => $msg));
+
+        // Aceeași plasă de siguranță ca la poll-ul din admin: dacă e treabă de făcut
+        // dar cronul a adormit (site fără trafic), îl repornim.
+        if ($pending > 0 && !get_transient(self::LOCK)) { $this->kick(); }
+
+        return array(
+            'items'        => $items,
+            'queue_pending'=> $pending,
+            'stopped'      => (int) get_option('hzb_stopped', 0),
+            'paused'       => (string) get_option('hzb_paused_reason', ''),
+            'gap'          => (int) get_option('hzb_gap', 120),
+        );
+    }
+
+    /** Comenzi din panoul central: start / stop / retry / clear (doar ce nu e în lucru). */
+    public function control($action) {
+        switch ($action) {
+            case 'start':
+                update_option('hzb_stopped', 0, 'no');
+                $this->kick();
+                return 'Procesarea a fost pornită.';
+            case 'stop':
+                update_option('hzb_stopped', 1, 'no');
+                wp_clear_scheduled_hook(self::HOOK);
+                return 'Procesarea a fost oprită.';
+            case 'retry':
+                $q = $this->queue();
+                $n = 0;
+                foreach ($q as &$item) {
+                    if ($item['s'] === 'error') { $item['s'] = 'pending'; $item['err'] = ''; $n++; }
+                }
+                unset($item);
+                $this->save_queue($q);
+                if ($n > 0) { $this->kick(); }
+                return sprintf('%d articole repuse în coadă.', $n);
+            case 'clear':
+                $q = array();
+                foreach ($this->queue() as $item) {
+                    if ($item['s'] === 'working') { $q[] = $item; }
+                }
+                $this->save_queue($q);
+                delete_option('hzb_paused_reason');
+                return 'Coada a fost golită.';
+        }
+        return '';
     }
 
     public function ajax_status() {
@@ -387,7 +507,7 @@ class HZ_Bulk {
 
         // Vrem imagini la fiecare articol: dacă limita zilnică Magnific e atinsă,
         // punem coada pe pauză până mâine în loc să publicăm articole fără poze.
-        $images = max(0, min(3, (int) get_option('hzb_images', 2)));
+        $images = $this->images_for($q[$idx]);
         if ($images > 0 && HZ_Magnific::has_key() && HZ_Magnific::limit_reached()) {
             // Cota Magnific se resetează la 00:00 UTC — reluăm exact atunci, nu la
             // miezul nopții local (în România ar însemna 2-3 ore de așteptare inutilă
@@ -442,14 +562,24 @@ class HZ_Bulk {
 
         // 1) Conținutul: același șablon și system prompt editorial ca butonul
         // „Articol nou" din editor — stil deja pus la punct per site.
+        $links = (isset($item['links']) && is_array($item['links'])) ? $item['links'] : array();
+
         $brief = $title;
         if (trim((string) $item['extra']) !== '') {
             $brief .= "\n\nInstrucțiuni suplimentare pentru acest lot de articole:\n" . trim((string) $item['extra']);
         }
+        // Ancorele cerute din panoul central intră în brief: modelul le scrie în text,
+        // iar linkul propriu-zis îl punem noi după generare (HZ_Links).
+        if (!empty($links) && class_exists('HZ_Links')) {
+            $brief .= HZ_Links::prompt_hint($links);
+        }
+        $words = (isset($item['len']) && (int) $item['len'] > 0)
+            ? (int) $item['len']
+            : (int) get_option('hzb_length', 1000);
         $tpl = get_option('cw_article_prompt', CW_Admin::default_article_prompt());
         $prompt = str_replace(
             array('{{continut}}', '{{cuvinte}}'),
-            array($brief, (string) max(300, (int) get_option('hzb_length', 1000))),
+            array($brief, (string) max(300, $words)),
             $tpl
         );
 
@@ -469,9 +599,23 @@ class HZ_Bulk {
             return $item;
         }
 
+        // 1b) Linkurile cerute din panoul central. Se pun ÎNAINTE de imagini, ca
+        // ancora să fie căutată doar în text, nu în legendele figurilor.
+        $link_note = '';
+        if (!empty($links) && class_exists('HZ_Links')) {
+            $applied     = HZ_Links::apply($content, $links);
+            $content     = $applied['content'];
+            $item['lnk'] = array(
+                'total'  => (int) $applied['total'],
+                'done'   => (int) $applied['done'],
+                'forced' => (int) $applied['forced'],
+            );
+            $link_note = HZ_Links::note($applied);
+        }
+
         // 2) Imaginile: interogare de căutare în engleză (stocul e indexat în
         // engleză), generată de model din titlu — apel minuscul, cost neglijabil.
-        $images   = max(0, min(3, (int) get_option('hzb_images', 2)));
+        $images   = $this->images_for($item);
         $img      = $this->fetch_images($title, $model, $images);
         $att_ids  = $img['ids'];
         $img_note = $img['note'];
@@ -541,7 +685,18 @@ class HZ_Bulk {
         } else {
             $item['note'] = count($att_ids) . ' imagini' . ($img_note !== '' ? ' (' . $img_note . ')' : '');
         }
+        if ($link_note !== '') {
+            $item['note'] = $link_note . ' · ' . $item['note'];
+        }
         return $item;
+    }
+
+    /** Câte imagini vrea acest articol: override din lot, altfel setarea site-ului. */
+    private function images_for($item) {
+        if (isset($item['img']) && $item['img'] !== null && $item['img'] !== '') {
+            return max(0, min(3, (int) $item['img']));
+        }
+        return max(0, min(3, (int) get_option('hzb_images', 2)));
     }
 
     /**
