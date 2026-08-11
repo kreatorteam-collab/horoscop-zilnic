@@ -16,6 +16,7 @@ if (!defined('ABSPATH')) { exit; }
  *   hz/v1/enqueue  -> adaugă articole în coadă
  *   hz/v1/status   -> progresul unui lot
  *   hz/v1/control  -> start | stop | retry | clear
+ *   hz/v1/settings -> suprascrie chei API, cheia Magnific, modelul implicit, limitele
  */
 class HZ_Remote {
 
@@ -27,7 +28,7 @@ class HZ_Remote {
     }
 
     public function register() {
-        $routes = array('info', 'enqueue', 'status', 'control');
+        $routes = array('info', 'enqueue', 'status', 'control', 'settings');
         foreach ($routes as $route) {
             register_rest_route('hz/v1', '/' . $route, array(
                 'methods'             => 'POST',
@@ -88,10 +89,19 @@ class HZ_Remote {
             'plugin_version'  => defined('HZ_VERSION') ? HZ_VERSION : '',
             'site_name'       => get_bloginfo('name'),
             'ai_key'          => class_exists('CW_API') && CW_API::has_key(),
+            'ai_openai'       => class_exists('CW_API') && CW_API::has_provider_key('openai'),
+            'ai_anthropic'    => class_exists('CW_API') && CW_API::has_provider_key('anthropic'),
             'ai_limit_hit'    => class_exists('CW_Usage') ? CW_Usage::limit_reached() : false,
             'ai_model'        => class_exists('CW_API') ? CW_API::resolve_model('') : '',
+            'ai_model_set'    => (string) get_option('cw_default_model', ''),
             'ai_month_cost'   => class_exists('CW_Usage') ? round((float) CW_Usage::month_cost(), 4) : 0,
+            'ai_month_limit'  => (float) get_option('cw_monthly_cost_limit', 0),
+            'models'          => class_exists('CW_Models') ? self::model_list() : array(),
             'magnific_key'    => HZ_Magnific::has_key(),
+            // Amprenta cheii Magnific (acelasi hash ca in contorul central) — panoul
+            // poate spune CARE cheie e pe site, fara sa vada niciodata cheia.
+            'magnific_hash'   => HZ_Magnific::key_hash(),
+            'magnific_limit'  => HZ_Magnific::daily_limit(),
             'magnific_left'   => HZ_Magnific::has_key()
                 ? max(0, HZ_Magnific::daily_limit() - HZ_Magnific::account_downloads_today())
                 : 0,
@@ -187,6 +197,103 @@ class HZ_Remote {
             ? max(0, HZ_Magnific::daily_limit() - HZ_Magnific::downloads_today())
             : 0;
         return $state;
+    }
+
+    /** Modelele pe care le cunoaște pluginul: id => etichetă (pentru dropdown-ul din panou). */
+    private static function model_list() {
+        $out = array();
+        foreach (CW_Models::all() as $id => $m) {
+            $out[] = array(
+                'id'       => $id,
+                'label'    => isset($m['label']) ? $m['label'] : $id,
+                'provider' => isset($m['provider']) ? $m['provider'] : '',
+                'in'       => isset($m['in']) ? (float) $m['in'] : 0,
+                'out'      => isset($m['out']) ? (float) $m['out'] : 0,
+            );
+        }
+        return $out;
+    }
+
+    /**
+     * Suprascrie setările site-ului din panoul central.
+     * Body: { set: { openai_key, anthropic_key, magnific_key, model, monthly_limit,
+     *                magnific_daily_limit, images, length, gap } }
+     *
+     * Cheile se scriu ÎN CLAR prin update_option: filtrele `pre_update_option_cw_*` /
+     * `pre_update_option_hzb_magnific_key` (înregistrate la plugins_loaded, deci active
+     * și în REST) le criptează exact o dată. NU cripta aici — ar ieși dublu criptat.
+     * Un câmp lipsă sau gol nu atinge valoarea existentă.
+     */
+    public function handle_settings(WP_REST_Request $req) {
+        $data = $this->auth($req);
+        if ($data instanceof WP_REST_Response) { return $data; }
+
+        $set = isset($data['set']) && is_array($data['set']) ? $data['set'] : array();
+        if (empty($set)) {
+            return new WP_REST_Response(array('error' => 'nothing_to_set'), 400);
+        }
+
+        $changed = array();
+        $skipped = array();
+
+        $secrets = array(
+            'openai_key'    => 'cw_openai_api_key',
+            'anthropic_key' => 'cw_api_key',
+            'magnific_key'  => 'hzb_magnific_key',
+        );
+        foreach ($secrets as $field => $option) {
+            if (!isset($set[$field])) { continue; }
+            $value = trim((string) $set[$field]);
+            if ($value === '') { continue; } // gol = păstrează cheia existentă
+            update_option($option, $value);
+            $changed[] = $field;
+        }
+
+        if (isset($set['model']) && trim((string) $set['model']) !== '') {
+            $model = sanitize_text_field((string) $set['model']);
+            if (CW_Models::exists($model)) {
+                update_option('cw_default_model', $model);
+                $changed[] = 'model';
+            } else {
+                $skipped[] = 'model necunoscut: ' . $model;
+            }
+        }
+
+        $numbers = array(
+            'monthly_limit'        => array('cw_monthly_cost_limit', 0, 10000),
+            'magnific_daily_limit' => array('hzb_daily_limit', 1, 1000),
+            'images'               => array('hzb_images', 0, 3),
+            'length'               => array('hzb_length', 300, 4000),
+            'gap'                  => array('hzb_gap', 5, 3600),
+        );
+        foreach ($numbers as $field => $cfg) {
+            if (!isset($set[$field]) || $set[$field] === '') { continue; }
+            list($option, $min, $max) = $cfg;
+            $value = max($min, min($max, (float) $set[$field]));
+            update_option($option, $option === 'cw_monthly_cost_limit' ? $value : (int) $value, 'no');
+            $changed[] = $field;
+        }
+
+        if (empty($changed)) {
+            return array('ok' => true, 'changed' => array(), 'skipped' => $skipped,
+                         'message' => 'Nimic de schimbat.');
+        }
+
+        return array(
+            'ok'      => true,
+            'changed' => $changed,
+            'skipped' => $skipped,
+            'after'   => array(
+                'ai_openai'      => CW_API::has_provider_key('openai'),
+                'ai_anthropic'   => CW_API::has_provider_key('anthropic'),
+                'ai_model_set'   => (string) get_option('cw_default_model', ''),
+                'ai_model'       => CW_API::resolve_model(''),
+                'ai_month_limit' => (float) get_option('cw_monthly_cost_limit', 0),
+                'magnific_key'   => HZ_Magnific::has_key(),
+                'magnific_hash'  => HZ_Magnific::key_hash(),
+                'magnific_limit' => HZ_Magnific::daily_limit(),
+            ),
+        );
     }
 
     /** start | stop | retry | clear */
