@@ -217,7 +217,8 @@ class HZ_Remote {
     /**
      * Suprascrie setările site-ului din panoul central.
      * Body: { set: { openai_key, anthropic_key, magnific_key, model, monthly_limit,
-     *                magnific_daily_limit, images, length, gap } }
+     *                magnific_daily_limit, images, length, gap },
+     *         clear: [ 'magnific_key', ... ] }
      *
      * Cheile se scriu ÎN CLAR prin update_option: filtrele `pre_update_option_cw_*` /
      * `pre_update_option_hzb_magnific_key` (înregistrate la plugins_loaded, deci active
@@ -228,8 +229,9 @@ class HZ_Remote {
         $data = $this->auth($req);
         if ($data instanceof WP_REST_Response) { return $data; }
 
-        $set = isset($data['set']) && is_array($data['set']) ? $data['set'] : array();
-        if (empty($set)) {
+        $set   = isset($data['set']) && is_array($data['set']) ? $data['set'] : array();
+        $clear = isset($data['clear']) && is_array($data['clear']) ? $data['clear'] : array();
+        if (empty($set) && empty($clear)) {
             return new WP_REST_Response(array('error' => 'nothing_to_set'), 400);
         }
 
@@ -241,6 +243,15 @@ class HZ_Remote {
             'anthropic_key' => 'cw_api_key',
             'magnific_key'  => 'hzb_magnific_key',
         );
+
+        // Ștergere de cheie (rotire / cheie revocată): un câmp gol NU șterge (filtrul
+        // păstrează valoarea veche), deci ștergerea trebuie cerută explicit.
+        foreach ($clear as $field) {
+            if (!isset($secrets[$field])) { continue; }
+            delete_option($secrets[$field]);
+            $changed[] = 'clear:' . $field;
+            unset($set[$field]); // ștergerea bate scrierea, dacă vin amândouă
+        }
         foreach ($secrets as $field => $option) {
             if (!isset($set[$field])) { continue; }
             $value = trim((string) $set[$field]);
