@@ -29,6 +29,8 @@ class HZ_Refresh {
 
     /** True dacă next_candidate() a golit chiar coada (vs. i s-a terminat bugetul de scanare). */
     public $exhausted = false;
+    /** Motivele respingerii din ultima scanare: [motiv => nr. articole]. */
+    public $last_reasons = array();
 
     /** Filtrul activ care fixează post_modified pe durata scrierilor unui articol. */
     private $mod_filter = null;
@@ -366,6 +368,7 @@ class HZ_Refresh {
         // zilnice la început ar raporta „nu mai sunt articole eligibile" după
         // prima pagină de rezultate, deși mai jos sunt mii.
         $this->exhausted = false;
+        $this->last_reasons = array();   // ce a respins scanarea asta, pe motive
         for ($i = 0; $i < max(1, (int) $rounds); $i++) {
             $q = new WP_Query($args);
             if (empty($q->posts)) {
@@ -376,6 +379,8 @@ class HZ_Refresh {
                 $reason = $this->skip_reason($p);
                 if ($reason === '') { return $p; }
                 update_post_meta($p->ID, self::META_SKIP, $reason);
+                $key = preg_replace('/^prea scurt.*/u', 'prea scurt', $reason);
+                $this->last_reasons[$key] = (isset($this->last_reasons[$key]) ? $this->last_reasons[$key] : 0) + 1;
             }
         }
         return null; // bugetul rundei s-a epuizat; următorul tick continuă de aici
@@ -930,7 +935,18 @@ class HZ_Refresh {
         } else {
             $post = $this->next_candidate();
             if (!$post) {
-                wp_send_json_error(array('message' => 'Nu am găsit niciun articol eligibil.'));
+                // Nu lăsăm userul cu „nu merge": spunem CE a respins scanarea.
+                $msg = 'Nu am găsit niciun articol eligibil.';
+                if (!empty($this->last_reasons)) {
+                    arsort($this->last_reasons);
+                    $parts = array();
+                    foreach ($this->last_reasons as $reason => $n) { $parts[] = $reason . ' (' . $n . ')'; }
+                    $msg .= ' Verificate acum și respinse: ' . implode(', ', $parts)
+                          . '. Pune un ID de articol în casetă ca să vezi motivul exact pentru el.';
+                } elseif ($this->exhausted) {
+                    $msg .= ' Toate articolele publicate au fost deja procesate sau marcate ca sărite.';
+                }
+                wp_send_json_error(array('message' => $msg));
             }
         }
 
