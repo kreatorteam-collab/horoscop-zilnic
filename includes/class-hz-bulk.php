@@ -688,6 +688,7 @@ class HZ_Bulk {
         }
         $cost += (float) $result['cost'];
         $searches = isset($result['searches']) ? (int) $result['searches'] : 0;
+        $queries  = isset($result['queries']) ? (int) $result['queries'] : 0;
 
         $content = $this->clean_html($result['text']);
         if (strlen($content) < 500) {
@@ -787,7 +788,11 @@ class HZ_Bulk {
             $item['note'] = $link_note . ' · ' . $item['note'];
         }
         if ($searches > 0) {
-            $item['note'] = $searches . ' căutări web · ' . $item['note'];
+            // Un apel de căutare poate grupa mai multe interogări — le arătăm pe amândouă,
+            // ca să se vadă că plafonul e pe APELURI, nu pe interogări.
+            $item['note'] = $searches . ' căutări web'
+                . ($queries > $searches ? ' (' . $queries . ' interogări)' : '')
+                . ' · ' . $item['note'];
         }
         if (!empty($result['incomplete'])) {
             $item['note'] = 'ATENȚIE: text tăiat la limita de tokeni · ' . $item['note'];

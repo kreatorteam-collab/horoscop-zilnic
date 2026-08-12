@@ -243,10 +243,24 @@ class CW_API {
             }, $user_prompt))
             : (string) $user_prompt;
 
+        // PLAFONUL de căutări la OpenAI cere DOUĂ lucruri, măsurat pe gpt-5.4-mini cu
+        // aceeași întrebare (august 2026):
+        //   fără nimic                      -> 4 apeluri / 11 interogări
+        //   doar max_tool_calls = 1         -> 2 apeluri /  8 interogări (doar reduce)
+        //   max_tool_calls + instrucțiune   -> 1 apel    /  1 interogare
+        // `max_uses` (sintaxa Anthropic) e respins de OpenAI cu 400.
+        $cap = self::web_search_max();
+        $input = sprintf(
+            'LIMITĂ: fă cel mult %d %s web în total, apoi scrie exclusiv din ce ai găsit.',
+            $cap,
+            $cap === 1 ? 'căutare' : 'căutări'
+        ) . "\n\n" . $input;
+
         $payload = array(
             'model'             => $model_id,
             'input'             => $input,
             'tools'             => array(array('type' => 'web_search')),
+            'max_tool_calls'    => $cap,
             'max_output_tokens' => $max_tokens,
         );
         $system = self::system_prompt();
@@ -274,10 +288,19 @@ class CW_API {
         }
 
         $text     = '';
-        $searches = 0;
+        $searches = 0;   // apeluri de căutare (unitatea taxată)
+        $queries  = 0;   // interogări trimise (un apel poate grupa mai multe)
         foreach ((isset($body['output']) && is_array($body['output'])) ? $body['output'] : array() as $item) {
             $type = isset($item['type']) ? $item['type'] : '';
-            if ($type === 'web_search_call') { $searches++; continue; }
+            if ($type === 'web_search_call') {
+                $searches++;
+                if (isset($item['action']['queries']) && is_array($item['action']['queries'])) {
+                    $queries += count($item['action']['queries']);
+                } else {
+                    $queries++;
+                }
+                continue;
+            }
             if ($type === 'message' && isset($item['content']) && is_array($item['content'])) {
                 foreach ($item['content'] as $c) {
                     if (isset($c['text'])) { $text .= $c['text']; }
@@ -300,6 +323,7 @@ class CW_API {
             'usage'      => $usage,
             'cost'       => $cost,
             'searches'   => $searches,
+            'queries'    => $queries,
             'incomplete' => $incomplete,
         );
     }

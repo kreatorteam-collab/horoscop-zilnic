@@ -298,6 +298,7 @@ class CW_Admin {
                         <p>
                             <label class="cw-label"><?php esc_html_e('Căutări maxime per articol', 'claude-writer'); ?></label>
                             <input type="number" name="cw_web_search_max" class="widefat" min="1" max="10" step="1" value="<?php echo esc_attr(get_option('cw_web_search_max', 3)); ?>" />
+                            <span class="cw-muted"><?php esc_html_e('Plafonul e pe APELURI de căutare (unitatea taxată). Un apel poate trimite mai multe interogări deodată, deci în notă poți vedea „2 căutări (5 interogări)" — se plătesc cele 2. Pe Claude limita e impusă de API; pe GPT o cerem prin buget de apeluri + instrucțiune în prompt (măsurat: se respectă, dar e o cerință, nu un zid).', 'claude-writer'); ?></span>
                         </p>
                         <p>
                             <label class="cw-label"><?php esc_html_e('Cost estimat per căutare ($) — doar pentru evidența costurilor', 'claude-writer'); ?></label>
