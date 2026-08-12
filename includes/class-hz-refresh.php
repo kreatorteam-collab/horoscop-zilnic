@@ -308,10 +308,21 @@ class HZ_Refresh {
         return false;
     }
 
-    /** True dacă articolul are deja o secțiune de întrebări frecvente. */
+    /**
+     * True dacă articolul are deja o secțiune de întrebări frecvente.
+     *
+     * v3.7.6: înainte era de ajuns cuvântul „frecvente" ORIUNDE în text, deci
+     * „cele mai frecvente greșeli" sau „răspundem la întrebări frecvente" scoteau
+     * articolul din joc — pe un blog de marketing ieșeau zeci de false pozitive.
+     * Acum cerem un TITLU (h2-h4) de FAQ sau schema FAQPage deja prezentă.
+     */
     public function has_faq($content) {
-        return (stripos($content, 'frecvente') !== false)
-            || (bool) preg_match('/<h[23][^>]*>[^<]*\bFAQ\b/i', $content);
+        $content = (string) $content;
+        if (stripos($content, 'FAQPage') !== false) { return true; }
+        return (bool) preg_match(
+            '/<h[2-4][^>]*>[^<]*(întrebări\s+frecvente|intrebari\s+frecvente|\bFAQ\b)/iu',
+            $content
+        );
     }
 
     /**
