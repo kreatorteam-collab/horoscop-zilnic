@@ -573,6 +573,24 @@ class HZ_Admin {
                         <p class="description"><?php esc_html_e('Se adaugă la promptul fiecărui articol din acest lot.', 'horoscop-zilnic'); ?></p>
                     </td>
                 </tr>
+                <tr>
+                    <th scope="row"><?php esc_html_e('Căutare web', 'horoscop-zilnic'); ?></th>
+                    <td>
+                        <label>
+                            <input type="checkbox" id="hzb-web" <?php checked(1, (int) get_option('cw_web_search', 0)); ?> />
+                            <?php esc_html_e('Caută pe web pentru articolele din acest lot (informații la zi, cu surse)', 'horoscop-zilnic'); ?>
+                        </label>
+                        <p class="description">
+                            <?php
+                            printf(
+                                /* translators: %s = costul estimat per căutare */
+                                esc_html__('Modelul face căutări reale înainte să scrie. Costă în plus ~%s per căutare (peste tokeni) și adaugă 30-60 de secunde per articol. Bifa pornește DOAR pentru lotul ăsta; setarea permanentă a site-ului e în tab-ul AI Writer.', 'horoscop-zilnic'),
+                                esc_html('$' . number_format((float) get_option('cw_web_search_cost', 0.01), 3))
+                            );
+                            ?>
+                        </p>
+                    </td>
+                </tr>
             </table>
             <p>
                 <button type="button" class="button button-primary" id="hzb-enqueue" <?php disabled(!$has_ai_key); ?>><?php esc_html_e('Adaugă în coadă și pornește', 'horoscop-zilnic'); ?></button>

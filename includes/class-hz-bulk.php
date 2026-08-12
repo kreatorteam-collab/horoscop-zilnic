@@ -108,6 +108,8 @@ class HZ_Bulk {
             'status' => $status,
             'model'  => $model,
             'extra'  => $extra,
+            // Bifa „Căutare web" din formular: se aplică DOAR lotului ăsta.
+            'web'    => isset($_POST['web']) ? (int) $_POST['web'] : '',
         ));
 
         $msg = sprintf('%d articole adăugate în coadă.', $res['added']);

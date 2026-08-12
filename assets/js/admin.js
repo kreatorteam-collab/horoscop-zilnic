@@ -159,7 +159,10 @@
                 category: $('#hzb-category').val(),
                 status: $('#hzb-status').val(),
                 model: $('#hzb-model').val(),
-                extra: $('#hzb-extra').val()
+                extra: $('#hzb-extra').val(),
+                // Bifa e per lot: trimitem mereu 0/1, ca să putem și opri căutarea
+                // pe un lot chiar dacă site-ul o are pornită.
+                web: $('#hzb-web').is(':checked') ? 1 : 0
             }).done(function (res) {
                 if (res && res.success) {
                     $st.css('color', '#00a32a').text(' ✓ ' + res.data.message);
