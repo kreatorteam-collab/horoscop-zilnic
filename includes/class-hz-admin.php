@@ -757,6 +757,7 @@ class HZ_Admin {
                     <tr><td><?php esc_html_e('Articole publicate', 'horoscop-zilnic'); ?></td><td id="hzr-c-total" style="text-align:right;font-weight:600;">-</td></tr>
                     <tr><td><?php esc_html_e('În categorii excluse', 'horoscop-zilnic'); ?></td><td id="hzr-c-cats" style="text-align:right;">-</td></tr>
                     <tr><td><?php esc_html_e('Sărite (link extern, FAQ existent, prea scurte)', 'horoscop-zilnic'); ?></td><td id="hzr-c-skip" style="text-align:right;">-</td></tr>
+                    <tbody id="hzr-reasons"></tbody>
                     <tr><td><?php esc_html_e('Procesate', 'horoscop-zilnic'); ?></td><td id="hzr-c-done" style="text-align:right;">-</td></tr>
                     <tr><td><strong><?php esc_html_e('Rămase eligibile (estimat)', 'horoscop-zilnic'); ?></strong></td><td id="hzr-c-elig" style="text-align:right;font-weight:600;">-</td></tr>
                 </tbody>

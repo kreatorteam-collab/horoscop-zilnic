@@ -266,6 +266,17 @@
                 $('#hzr-c-done').text(c.done || 0);
                 $('#hzr-c-elig').text(c.eligible || 0);
 
+                // Defalcarea motivelor de sarire: fara ea, „Sarite: 53" pare un bug.
+                var $r = $('#hzr-reasons').empty();
+                $.each(c.reasons || {}, function (reason, n) {
+                    $r.append(
+                        $('<tr/>').append(
+                            $('<td/>').css({ paddingLeft: '28px', color: '#646970' }).text('– ' + reason),
+                            $('<td/>').css({ textAlign: 'right', color: '#646970' }).text(n)
+                        )
+                    );
+                });
+
                 var info = 'Azi: <strong>' + d.today + '/' + d.limit + '</strong> articole. ' +
                            'Total procesate: <strong>' + d.done + '</strong>. Cost cumulat: <strong>$' + d.cost + '</strong>.';
                 if (!d.enabled) {

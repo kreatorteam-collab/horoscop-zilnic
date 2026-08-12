@@ -855,12 +855,29 @@ class HZ_Refresh {
                    AND tt.taxonomy='category' AND tt.term_id IN ({$ids})"
             );
         }
+        // Defalcarea motivelor: „Sărite: 53" nu spune nimic dacă nu vezi DE CE
+        // (link extern? articole bulk? prea scurte?). Motivul e deja salvat în meta.
+        $reasons = array();
+        $rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT meta_value AS reason, COUNT(*) AS n FROM {$wpdb->postmeta}
+             WHERE meta_key=%s GROUP BY meta_value ORDER BY n DESC LIMIT 12",
+            self::META_SKIP
+        ), ARRAY_A);
+        foreach ((array) $rows as $r) {
+            // „prea scurt (137 cuvinte)" -> le grupăm, altfel ies zeci de rânduri
+            $label = preg_replace('/^prea scurt.*/u', 'prea scurt', (string) $r['reason']);
+            $label = $label !== '' ? $label : 'nespecificat';
+            $reasons[$label] = (isset($reasons[$label]) ? $reasons[$label] : 0) + (int) $r['n'];
+        }
+        arsort($reasons);
+
         return array(
             'total'     => $total,
             'excl_cats' => $in_cats,
             'done'      => $done,
             'skipped'   => $skip,
             'eligible'  => max(0, $total - $in_cats - $done - $skip),
+            'reasons'   => $reasons,
         );
     }
 
