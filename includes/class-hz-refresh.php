@@ -811,6 +811,14 @@ TXT;
 
         $model = CW_API::resolve_model((string) $this->opt('hzr_model'));
 
+        // „Lucrează acum": tab-ul arată la ce articol e, cât timp durează. Transient cu
+        // TTL, ca să dispară singur dacă rularea moare la jumătate.
+        set_transient('hzr_current', array(
+            'id'    => (int) $post->ID,
+            'title' => (string) get_the_title($post),
+            't'     => time(),
+        ), 10 * MINUTE_IN_SECONDS);
+
         // v3.8.0: rescrierea completă se face PRIMA, ca blocurile (idei/FAQ/descriere)
         // să fie extrase din textul NOU. Originalul rămâne la $original_true pentru
         // backup — el e ce pune la loc butonul „Anulează".
@@ -897,6 +905,8 @@ TXT;
         $this->unfreeze_modified();      // de aici încolo, orice scriere revine la ora reală
         $this->enforce_modified($post->ID); // …dar ora noastră se rescrie la final, peste toți
         $this->bump_stats($cost);
+        $this->log_entry($post->ID, implode(' + ', $parts), $cost, true);
+        delete_transient('hzr_current');
         return array(
             'ok'   => true,
             'msg'  => sprintf('%s: %s adăugate.', get_the_title($post), implode(' + ', $parts)),
@@ -915,6 +925,25 @@ TXT;
             $s = array('d' => $this->day_key(), 'n' => 0);
         }
         return $s;
+    }
+
+    /**
+     * Jurnalul ultimelor articole atinse (ultimele 25). Fără el, tab-ul arăta doar
+     * niște contoare: „Total procesate: 1" și atât — nu se vedea CE a făcut.
+     */
+    private function log_entry($post_id, $what, $cost, $ok = true) {
+        $log = get_option('hzr_log', array());
+        if (!is_array($log)) { $log = array(); }
+        array_unshift($log, array(
+            't'     => current_time('mysql'),
+            'id'    => (int) $post_id,
+            'title' => (string) get_the_title($post_id),
+            'url'   => (string) get_permalink($post_id),
+            'what'  => mb_substr((string) $what, 0, 200),
+            'cost'  => round((float) $cost, 5),
+            'ok'    => $ok ? 1 : 0,
+        ));
+        update_option('hzr_log', array_slice($log, 0, 25), 'no');
     }
 
     private function bump_stats($cost) {
@@ -1099,9 +1128,15 @@ TXT;
             'done'      => (int) (isset($stats['done']) ? $stats['done'] : 0),
             'cost'      => round((float) (isset($stats['cost']) ? $stats['cost'] : 0), 3),
             'next'      => $next ? wp_date('d.m H:i', $next) : '',
+            // Cât mai e până atunci, în clar: „peste 18 ore" spune mai mult decât o oră.
+            'next_in'   => $next ? human_time_diff(time(), $next) : '',
             'idle'      => get_option('hzr_idle', ''),
             'error'     => get_option('hzr_last_error', ''),
             'counts'    => $this->counts(),
+            'log'       => array_slice((array) get_option('hzr_log', array()), 0, 15),
+            // „Lucrează acum": articolul aflat în procesare chiar în clipa asta.
+            'current'   => get_transient('hzr_current') ?: null,
+            'working'   => get_transient(self::LOCK) ? 1 : 0,
         ));
     }
 
@@ -1240,6 +1275,17 @@ TXT;
             "DELETE FROM {$wpdb->postmeta} WHERE meta_key=%s", self::META_SKIP));
         update_option('hzr_cats_seeded', 1, 'no'); // lista de categorii rămâne cea aleasă de user
         delete_option('hzr_idle');
-        wp_send_json_success(array('message' => sprintf('%d marcaje de excludere șterse. Articolele vor fi re-evaluate.', $n)));
+
+        // Când coada s-a golit, următoarea rulare a fost programată pentru mâine.
+        // După re-evaluare avem din nou de lucru, deci reprogramăm ACUM — altfel
+        // userul vede „60 eligibile" și un cron care pornește abia peste 18 ore.
+        wp_clear_scheduled_hook(self::HOOK);
+        $this->kick(20);
+
+        $msg = sprintf('%d marcaje de excludere șterse. Articolele vor fi re-evaluate.', $n);
+        if ((int) $this->opt('hzr_enabled') && !(int) $this->opt('hzr_stopped')) {
+            $msg .= ' Am reprogramat procesarea să pornească în câteva secunde.';
+        }
+        wp_send_json_success(array('message' => $msg));
     }
 }

@@ -284,11 +284,41 @@
                 } else if (d.stopped) {
                     info += ' <span style="color:#996800;">Procesare pusă pe pauză.</span>';
                 } else if (d.next) {
-                    info += ' Următorul articol: ' + d.next + '.';
+                    info += ' Următorul articol: ' + d.next +
+                            (d.next_in ? ' (peste ' + d.next_in + ')' : '') + '.';
+                } else {
+                    info += ' <span style="color:#996800;">Nicio rulare programată — apasă „Re-evaluează" sau repornește procesarea.</span>';
                 }
                 if (d.idle) { info += ' <span style="color:#996800;">Nu mai sunt articole eligibile.</span>'; }
                 if (d.error) { info += ' <span style="color:#b32d2e;">Ultima eroare: ' + d.error + '</span>'; }
+
+                // Se vede CA lucreaza: articolul aflat in lucru chiar acum.
+                if (d.current && d.current.title) {
+                    var secs = Math.max(0, Math.round(Date.now() / 1000) - (parseInt(d.current.t, 10) || 0));
+                    info = '<span style="color:#2271b1;font-weight:600;">⏳ Acum lucrează la: „' + d.current.title +
+                           '" (de ' + secs + ' secunde)</span><br />' + info;
+                } else if (d.working) {
+                    info = '<span style="color:#2271b1;font-weight:600;">⏳ Procesare în curs…</span><br />' + info;
+                }
                 $('#hzr-progress').html(info);
+
+                // Ce a facut deja: ultimele articole atinse, cu link si cost.
+                var $log = $('#hzr-log').empty();
+                if (d.log && d.log.length) {
+                    var rows = '';
+                    $.each(d.log, function (i, e) {
+                        rows += '<tr>' +
+                            '<td style="white-space:nowrap;color:#646970;">' + (e.t || '').substring(5, 16) + '</td>' +
+                            '<td><a href="' + e.url + '" target="_blank" rel="noopener">' + e.title + '</a></td>' +
+                            '<td>' + (e.what || '') + '</td>' +
+                            '<td style="text-align:right;white-space:nowrap;">$' + Number(e.cost || 0).toFixed(4) + '</td>' +
+                            '</tr>';
+                    });
+                    $log.html('<h3 style="margin-bottom:6px;">Ce s-a procesat</h3>' +
+                        '<table class="widefat striped" style="max-width:900px;"><thead><tr>' +
+                        '<th style="width:110px;">Când</th><th>Articol</th><th>Ce s-a adăugat</th>' +
+                        '<th style="width:90px;text-align:right;">Cost</th></tr></thead><tbody>' + rows + '</tbody></table>');
+                }
 
                 $('#hzr-toggle').data('stopped', d.stopped ? 1 : 0)
                     .text(d.stopped ? 'Repornește procesarea' : 'Oprește procesarea');
@@ -353,7 +383,8 @@
         });
 
         refresh();
-        setInterval(refresh, 30000);
+        // 10s, nu 30: cand lucreaza vrei sa vezi ca se misca, nu sa astepti jumatate de minut.
+        setInterval(refresh, 10000);
     }
 
     $(function () {

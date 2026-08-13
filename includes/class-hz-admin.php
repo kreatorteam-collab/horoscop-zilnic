@@ -769,6 +769,8 @@ class HZ_Admin {
                 <?php esc_html_e('„Estimat" pentru că linkurile externe se verifică la procesare: articolele cu link extern trec în rândul „Sărite" pe măsură ce sunt evaluate.', 'horoscop-zilnic'); ?>
             </p>
 
+            <div id="hzr-log" style="margin:14px 0;"></div>
+
             <p>
                 <button type="button" class="button button-primary" id="hzr-toggle" data-stopped="<?php echo (int) get_option('hzr_stopped', 0); ?>"><?php echo (int) get_option('hzr_stopped', 0) ? esc_html__('Repornește procesarea', 'horoscop-zilnic') : esc_html__('Oprește procesarea', 'horoscop-zilnic'); ?></button>
                 <button type="button" class="button" id="hzr-test" <?php disabled(!$has_ai_key); ?>><?php esc_html_e('Testează pe un articol', 'horoscop-zilnic'); ?></button>
