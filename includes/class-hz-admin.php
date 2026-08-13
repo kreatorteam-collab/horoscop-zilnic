@@ -117,6 +117,9 @@ class HZ_Admin {
             'hzr_excluded_cats' => 'hz_sanitize_cat_csv',
             'hzr_prompt'        => 'hz_sanitize_prompt',
             'hzr_system_prompt' => 'hz_sanitize_prompt',
+            'hzr_rewrite'       => 'absint',
+            'hzr_rewrite_ext'   => 'absint',
+            'hzr_rewrite_prompt' => 'hz_sanitize_prompt',
         );
         foreach ($ropts as $name => $cb) {
             register_setting('hzr_settings', $name, array('sanitize_callback' => $cb));
@@ -807,6 +810,24 @@ class HZ_Admin {
                         </td>
                     </tr>
                     <tr>
+                        <th scope="row"><?php esc_html_e('Rescrie tot articolul', 'horoscop-zilnic'); ?></th>
+                        <td>
+                            <input type="hidden" name="hzr_rewrite" value="0" />
+                            <label><input type="checkbox" name="hzr_rewrite" value="1" <?php checked(1, (int) get_option('hzr_rewrite', 0)); ?> /> <strong><?php esc_html_e('Da — rescrie textul, nu doar adaugă blocuri', 'horoscop-zilnic'); ?></strong></label>
+                            <p class="description">
+                                <?php esc_html_e('Articolul e rescris de la cap la coadă pe același subiect, cu aceleași fapte și cifre, la lungime cel puțin egală. Se PĂSTREAZĂ: imaginile (repuse după subtitluri), linkurile (repuse cu aceleași ancore, inclusiv cele plătite), slug-ul și data publicării. Conținutul original intră în backup, deci „Anulează" îl pune la loc intact.', 'horoscop-zilnic'); ?>
+                            </p>
+                            <p class="description" style="color:#996800;">
+                                <?php esc_html_e('Costă de câteva ori mai mult decât modul „doar blocuri" (se generează tot textul) și durează mai mult per articol. Dacă textul rescris iese mult mai scurt decât originalul, articolul NU se suprascrie. Testează pe un articol înainte de a porni procesarea zilnică.', 'horoscop-zilnic'); ?>
+                            </p>
+                            <input type="hidden" name="hzr_rewrite_ext" value="0" />
+                            <label><input type="checkbox" name="hzr_rewrite_ext" value="1" <?php checked(1, (int) get_option('hzr_rewrite_ext', 0)); ?> /> <?php esc_html_e('Acceptă și articolele cu link către alt domeniu (linkurile se păstrează)', 'horoscop-zilnic'); ?></label>
+                            <p class="description">
+                                <?php esc_html_e('Implicit sunt sărite, fiindcă pe flotă alea sunt advertoriale plătite. Bifează pe site-urile unde linkurile externe sunt conținut normal.', 'horoscop-zilnic'); ?>
+                            </p>
+                        </td>
+                    </tr>
+                    <tr>
                         <th scope="row"><?php esc_html_e('Rescrie și titlul', 'horoscop-zilnic'); ?></th>
                         <td>
                             <input type="hidden" name="hzr_do_title" value="0" />
@@ -927,6 +948,14 @@ class HZ_Admin {
                             <?php $pp = (string) get_option('hzr_prompt', ''); if (trim($pp) === '') { $pp = HZ_Refresh::default_prompt(); } ?>
                             <textarea name="hzr_prompt" id="hzr_prompt" class="large-text code" rows="8"><?php echo esc_textarea($pp); ?></textarea>
                             <p class="description"><?php esc_html_e('Placeholdere: {{titlu}}, {{continut}}, {{n_faq}}, {{n_idei}}. Răspunsul TREBUIE să rămână JSON.', 'horoscop-zilnic'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="hzr_rewrite_prompt"><?php esc_html_e('Prompt rescriere completă', 'horoscop-zilnic'); ?></label></th>
+                        <td>
+                            <?php $rp = (string) get_option('hzr_rewrite_prompt', ''); if (trim($rp) === '') { $rp = HZ_Refresh::default_rewrite_prompt(); } ?>
+                            <textarea name="hzr_rewrite_prompt" id="hzr_rewrite_prompt" class="large-text code" rows="8"><?php echo esc_textarea($rp); ?></textarea>
+                            <p class="description"><?php esc_html_e('Folosit doar când e bifat „Rescrie tot articolul". Placeholdere: {{titlu}}, {{continut}}, {{cuvinte}}, {{ancore}}. Răspunsul e HTML curat, NU JSON — imaginile și linkurile le repune pluginul.', 'horoscop-zilnic'); ?></p>
                         </td>
                     </tr>
                 </table>

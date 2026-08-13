@@ -156,7 +156,35 @@ class HZ_Refresh {
             'hzr_stopped'       => 0,
             'hzr_prompt'        => '',
             'hzr_system_prompt' => '',
+            // v3.8.0 — rescrierea completă a articolului (nu doar blocuri adăugate).
+            'hzr_rewrite'       => 0,      // OFF implicit: e o operație care înlocuiește textul
+            'hzr_rewrite_ext'   => 0,      // acceptă și articolele cu link extern (linkurile se păstrează)
+            'hzr_rewrite_prompt' => '',
         );
+    }
+
+    /** Promptul implicit pentru rescrierea completă (editabil în setări). */
+    public static function default_rewrite_prompt() {
+        return <<<TXT
+Rescrie complet articolul de mai jos, păstrând subiectul, faptele și cifrele.
+
+REGULI:
+- Aceeași limbă (română, cu diacritice), aceeași temă, același unghi editorial.
+- Structură clară: paragrafe scurte, subtitluri <h2>/<h3> unde ajută. FĂRĂ <h1>.
+- Lungime țintă: aproximativ {{cuvinte}} de cuvinte (nu mai scurt cu mult).
+- NU inventa date, prețuri, statistici sau surse care nu sunt în textul original.
+- Nu scrie introduceri de tip „În acest articol vom vorbi despre".
+- Întoarce DOAR HTML-ul articolului (p, h2, h3, ul, ol, strong, em), fără <html>, fără comentarii.
+- NU pune imagini și NU pune linkuri: le adaug eu după tine.
+- NU include o secțiune de întrebări frecvente / FAQ și niciun rezumat de tip
+  „Ce trebuie să reții": blocurile alea le adaug eu separat, ar ieși duplicate.
+{{ancore}}
+
+TITLU: {{titlu}}
+
+ARTICOL ORIGINAL:
+{{continut}}
+TXT;
     }
 
     public static function default_system_prompt() {
@@ -342,8 +370,15 @@ class HZ_Refresh {
         if (get_post_meta($post->ID, '_magpress_adult', true)) { return 'conținut 18+'; }
 
         $c = (string) $post->post_content;
-        if ($this->has_external_link($c))                { return 'link extern'; }
-        if ($this->has_faq($c))                          { return 'are deja FAQ'; }
+        $rewrite = (int) $this->opt('hzr_rewrite');
+        // Cu rescriere completă, linkurile se extrag și se repun după — deci
+        // articolele cu link extern pot fi acceptate, dar DOAR dacă ceri explicit
+        // (pe flotă regula asta protejează advertorialele plătite).
+        if ($this->has_external_link($c) && !($rewrite && (int) $this->opt('hzr_rewrite_ext'))) {
+            return 'link extern';
+        }
+        // Un FAQ existent nu mai e piedică la rescriere: textul nou îl înlocuiește.
+        if (!$rewrite && $this->has_faq($c))             { return 'are deja FAQ'; }
         // str_word_count nu e sigur pe UTF-8 (diacriticele rup numărătoarea) → \p{L}+
         $words = preg_match_all('/\p{L}+/u', wp_strip_all_tags(strip_shortcodes($c)));
         if ($words < max(50, (int) $this->opt('hzr_min_words'))) {
@@ -462,6 +497,142 @@ class HZ_Refresh {
         remove_filter('cw_system_prompt', $filter, 99);
 
         return $res;
+    }
+
+    /* ===================== Rescriere completă (v3.8.0) ===================== */
+
+    /** Blocurile de imagine din articol (figure sau img simplu), în ordine. */
+    private function extract_media($html) {
+        preg_match_all('/<figure\b[^>]*>.*?<\/figure>|<img\b[^>]*>/is', (string) $html, $m);
+        return isset($m[0]) ? $m[0] : array();
+    }
+
+    /**
+     * Linkurile din articol, în forma cerută de HZ_Links (anchor/url/rel).
+     * Le scoatem ÎNAINTE de rescriere și le repunem după — altfel un articol
+     * rescris ar pierde linkurile interne și, mai grav, pe cele plătite.
+     */
+    private function extract_links($html) {
+        $out = array();
+        if (!preg_match_all('/<a\s([^>]*?)href\s*=\s*["\']([^"\']+)["\']([^>]*)>(.*?)<\/a>/is', (string) $html, $m, PREG_SET_ORDER)) {
+            return $out;
+        }
+        $seen = array();
+        foreach ($m as $hit) {
+            $url    = trim(html_entity_decode($hit[2], ENT_QUOTES, 'UTF-8'));
+            $anchor = trim(wp_strip_all_tags($hit[4]));
+            if ($url === '' || $anchor === '' || $url[0] === '#') { continue; }
+            if (preg_match('/^(mailto:|tel:|javascript:|data:)/i', $url)) { continue; }
+            if (isset($seen[$url])) { continue; }
+            $seen[$url] = 1;
+
+            $rel  = '';
+            $attr = $hit[1] . ' ' . $hit[3];
+            if (preg_match('/rel\s*=\s*["\']([^"\']+)["\']/i', $attr, $r)) {
+                $v = strtolower($r[1]);
+                if (strpos($v, 'sponsored') !== false)    { $rel = 'sponsored'; }
+                elseif (strpos($v, 'nofollow') !== false) { $rel = 'nofollow'; }
+            }
+            $out[] = array('anchor' => mb_substr($anchor, 0, 120), 'url' => $url, 'rel' => $rel);
+            if (count($out) >= 10) { break; }
+        }
+        return $out;
+    }
+
+    /** Repune imaginile în textul nou: câte una după fiecare H2, restul la final. */
+    private function reinsert_media($content, $media) {
+        if (empty($media)) { return $content; }
+        $parts = preg_split('/(<\/h2>)/i', $content, -1, PREG_SPLIT_DELIM_CAPTURE);
+        $out = '';
+        $i   = 0;
+        foreach ($parts as $part) {
+            $out .= $part;
+            if (strtolower($part) === '</h2>' && $i < count($media)) {
+                $out .= "\n" . $media[$i] . "\n";
+                $i++;
+            }
+        }
+        while ($i < count($media)) { $out .= "\n" . $media[$i]; $i++; }
+        return $out;
+    }
+
+    /**
+     * Rescrie complet un articol. Întoarce array('ok','content','cost','msg','note').
+     *
+     * Garanții: imaginile și linkurile din original se repun în textul nou (linkurile
+     * prin HZ_Links, care le inserează chiar dacă modelul n-a folosit ancora), iar
+     * dacă textul rescris iese mult mai scurt decât originalul refuzăm scrierea —
+     * mai bine articolul vechi decât unul ciuntit.
+     */
+    private function rewrite_article($post, $model) {
+        $original = (string) $post->post_content;
+        $before   = preg_match_all('/\p{L}+/u', wp_strip_all_tags(strip_shortcodes($original)));
+        $media    = $this->extract_media($original);
+        $links    = $this->extract_links($original);
+
+        $anchors = '';
+        if (!empty($links)) {
+            $list = array();
+            foreach ($links as $l) { $list[] = '„' . $l['anchor'] . '"'; }
+            $anchors = "- Folosește în text, natural și o singură dată fiecare, expresiile: "
+                     . implode(', ', $list) . ' (fără linkuri — le pun eu).';
+        }
+
+        $tpl = (string) $this->opt('hzr_rewrite_prompt');
+        if (trim($tpl) === '') { $tpl = self::default_rewrite_prompt(); }
+        $prompt = str_replace(
+            array('{{titlu}}', '{{cuvinte}}', '{{ancore}}', '{{continut}}'),
+            array(get_the_title($post), (string) max(300, $before), $anchors, $this->plain_text($original)),
+            $tpl
+        );
+
+        // Aici NU suprascriem system promptul: rescrierea trebuie să sune ca articolele
+        // site-ului, deci folosim promptul editorial din AI Writer. Fără căutare web.
+        $res = CW_API::no_web(function () use ($model, $prompt) {
+            return CW_API::generate($model, $prompt, 8000);
+        });
+        if (is_wp_error($res)) {
+            return array('ok' => false, 'content' => '', 'cost' => 0.0, 'msg' => $res->get_error_message(), 'note' => '');
+        }
+        $cost = isset($res['cost']) ? (float) $res['cost'] : 0.0;
+
+        $text = trim((string) $res['text']);
+        $text = preg_replace('/^```[a-z]*\s*/i', '', $text);
+        $text = preg_replace('/\s*```$/', '', $text);
+        $text = preg_replace('/^\s*<h1[^>]*>.*?<\/h1>\s*/is', '', $text);
+        $text = trim($text);
+
+        // Dacă noi adăugăm blocul de FAQ, scoatem orice secțiune de FAQ pe care a
+        // scris-o modelul (articolele vechi au deseori una, iar el o rescrie) —
+        // altfel articolul iese cu „Întrebări frecvente" de două ori.
+        if ((int) $this->opt('hzr_do_faq')) {
+            $text = preg_replace(
+                '/<h[23][^>]*>[^<]*(întrebări\s+frecvente|intrebari\s+frecvente|\bFAQ\b)[^<]*<\/h[23]>.*?(?=<h2\b|$)/isu',
+                '',
+                $text
+            );
+            $text = trim($text);
+        }
+
+        $after = preg_match_all('/\p{L}+/u', wp_strip_all_tags($text));
+        $min   = max(150, (int) round($before * 0.6));
+        if ($after < $min) {
+            return array('ok' => false, 'content' => '', 'cost' => $cost, 'note' => '',
+                'msg' => sprintf('textul rescris e prea scurt (%d cuvinte față de %d) — nu suprascriu', $after, $before));
+        }
+
+        $content = $this->reinsert_media($text, $media);
+
+        $note = sprintf('rescris (%d → %d cuvinte)', $before, $after);
+        if (!empty($media)) { $note .= ', ' . count($media) . ' imagini păstrate'; }
+        if (!empty($links) && class_exists('HZ_Links')) {
+            $applied = HZ_Links::apply($content, $links);
+            $content = $applied['content'];
+            $note   .= ', ' . $applied['done'] . '/' . $applied['total'] . ' linkuri repuse';
+            if (!empty($applied['forced'])) { $note .= ' (' . $applied['forced'] . ' reinserate)'; }
+        }
+
+        return array('ok' => true, 'content' => $content, 'cost' => $cost, 'msg' => '', 'note' => $note);
     }
 
     /* ===================== Construcția blocurilor ===================== */
@@ -639,6 +810,23 @@ class HZ_Refresh {
         }
 
         $model = CW_API::resolve_model((string) $this->opt('hzr_model'));
+
+        // v3.8.0: rescrierea completă se face PRIMA, ca blocurile (idei/FAQ/descriere)
+        // să fie extrase din textul NOU. Originalul rămâne la $original_true pentru
+        // backup — el e ce pune la loc butonul „Anulează".
+        $original_true = (string) $post->post_content;
+        $rewrite_cost  = 0.0;
+        $rewrite_note  = '';
+        if ((int) $this->opt('hzr_rewrite')) {
+            $rw = $this->rewrite_article($post, $model);
+            $rewrite_cost = (float) $rw['cost'];
+            if (!$rw['ok']) {
+                return array('ok' => false, 'msg' => 'Rescriere eșuată: ' . $rw['msg'], 'cost' => $rewrite_cost);
+            }
+            $rewrite_note = $rw['note'];
+            $post->post_content = $rw['content']; // doar în memorie, până la scriere
+        }
+
         // Descrierea o cerem doar dacă lipsește (sau dacă userul cere suprascriere),
         // titlul doar dacă articolul trece filtrul „n-avem ce pierde".
         $want_meta  = (int) $this->opt('hzr_do_meta') && $this->needs_meta($post->ID);
@@ -646,9 +834,9 @@ class HZ_Refresh {
 
         $res = $this->ask_model($post, $model, $want_meta, $want_title);
         if (is_wp_error($res)) {
-            return array('ok' => false, 'msg' => $res->get_error_message(), 'cost' => 0.0);
+            return array('ok' => false, 'msg' => $res->get_error_message(), 'cost' => $rewrite_cost);
         }
-        $cost = isset($res['cost']) ? (float) $res['cost'] : 0.0;
+        $cost = $rewrite_cost + (isset($res['cost']) ? (float) $res['cost'] : 0.0);
 
         $data = $this->parse_json(isset($res['text']) ? $res['text'] : '');
         if (!$data) {
@@ -660,16 +848,16 @@ class HZ_Refresh {
         $tk_html  = ((int) $this->opt('hzr_do_takeaways') && !empty($data['idei']) && is_array($data['idei']))
             ? $this->build_takeaways($data['idei']) : '';
 
-        // FAQPage are sens de la 2 perechi în sus; sub asta nu merită atinsă data articolului.
-        if ($faq_html === '' && $tk_html === '') {
+        // FAQPage are sens de la 2 perechi în sus; sub asta nu merită atinsă data
+        // articolului — DAR dacă am rescris articolul, avem oricum ce salva.
+        if ($faq_html === '' && $tk_html === '' && $rewrite_note === '') {
             update_post_meta($post->ID, self::META_SKIP, 'AI nu a returnat blocuri utile');
             return array('ok' => false, 'msg' => 'Modelul nu a returnat blocuri utilizabile.', 'cost' => $cost);
         }
 
-        $original = (string) $post->post_content;
-        update_post_meta($post->ID, self::META_BACKUP, $original); // ÎNAINTE de orice scriere
+        update_post_meta($post->ID, self::META_BACKUP, $original_true); // ÎNAINTE de orice scriere
 
-        $content = $this->insert_takeaways($original, $tk_html);
+        $content = $this->insert_takeaways((string) $post->post_content, $tk_html);
         $content = rtrim($content) . "\n" . $faq_html;
 
         // Toate scrierile articolului (conținut, rezumat, titlu) primesc ACEEAȘI oră,
@@ -692,6 +880,7 @@ class HZ_Refresh {
         update_post_meta($post->ID, '_hzr_model', $model);
 
         $parts = array();
+        if ($rewrite_note !== '') { $parts[] = $rewrite_note; }
         if ($tk_html !== '')  { $parts[] = 'idei-cheie'; }
         if ($faq_html !== '') { $parts[] = 'FAQ'; }
 
