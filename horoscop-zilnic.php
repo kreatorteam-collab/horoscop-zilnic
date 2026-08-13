@@ -3,7 +3,7 @@
  * Plugin Name: AI Writer & Conținut Zilnic
  * Plugin URI: https://targetseo.ro/
  * Description: Generează și rescrie articole SEO direct în editor (GPT-5.6 și Claude), creează articole în bulk cu imagini de stock relevante (Magnific), împrospătează articolele existente cu întrebări frecvente și idei-cheie (schema FAQPage) și publică automat conținut zilnic: horoscopul cu toate cele 12 zodii și vremea pe regiuni (date oficiale ANM). Un singur plugin: chei API, costuri, editor, bulk, refresh, horoscop și vreme.
- * Version: 3.8.2
+ * Version: 3.8.3
  * Author: Eduard / TargetSEO
  * Text Domain: horoscop-zilnic
  * Requires at least: 5.6
@@ -15,7 +15,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('HZ_VERSION', '3.8.2');
+define('HZ_VERSION', '3.8.3');
 define('HZ_PATH', plugin_dir_path(__FILE__));
 define('HZ_URL', plugin_dir_url(__FILE__));
 
@@ -277,5 +277,6 @@ register_deactivation_hook(__FILE__, function () {
     wp_clear_scheduled_hook(HZ_Horoscope::HOOK);
     wp_clear_scheduled_hook(HZ_Weather::HOOK);
     wp_clear_scheduled_hook(HZ_Bulk::HOOK);
+    wp_clear_scheduled_hook(HZ_Bulk::WATCHDOG);
     wp_clear_scheduled_hook(HZ_Refresh::HOOK);
 });

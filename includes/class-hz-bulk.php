@@ -15,9 +15,17 @@ class HZ_Bulk {
 
     const HOOK = 'hz_bulk_process';
     const LOCK = 'hz_bulk_lock';
+    const WATCHDOG = 'hz_bulk_watchdog';
 
     public function init() {
         add_action(self::HOOK, array($this, 'process_tick'));
+        // v3.8.3: watchdog care se auto-vindecă - curăță o rulare moartă (lock rămas)
+        // și repornește coada SINGUR, fără „Deblochează" manual.
+        add_filter('cron_schedules', array($this, 'cron_intervals'));
+        add_action(self::WATCHDOG, array($this, 'watchdog_tick'));
+        if (!wp_next_scheduled(self::WATCHDOG)) {
+            wp_schedule_event(time() + 120, 'hz_5min', self::WATCHDOG);
+        }
         add_action('wp_ajax_hzb_enqueue', array($this, 'ajax_enqueue'));
         add_action('wp_ajax_hzb_status', array($this, 'ajax_status'));
         add_action('wp_ajax_hzb_quota', array($this, 'ajax_quota'));
@@ -25,6 +33,19 @@ class HZ_Bulk {
         add_action('wp_ajax_hzb_clear', array($this, 'ajax_clear'));
         add_action('wp_ajax_hzb_toggle', array($this, 'ajax_toggle'));
         add_action('wp_ajax_hzb_backfill', array($this, 'ajax_backfill'));
+    }
+
+    /** Interval de 5 min pentru watchdog (WP are din oficiu doar hourly/twicedaily/daily). */
+    public function cron_intervals($schedules) {
+        if (empty($schedules['hz_5min'])) {
+            $schedules['hz_5min'] = array('interval' => 300, 'display' => 'La 5 minute (HZ)');
+        }
+        return $schedules;
+    }
+
+    /** Tick-ul watchdog-ului (rulează în fundal): doar încearcă recuperarea unei rulări moarte. */
+    public function watchdog_tick() {
+        $this->maybe_recover();
     }
 
     /* ---- Coada (stocată în opțiune, fără autoload) ---- */
@@ -47,6 +68,48 @@ class HZ_Bulk {
         if (!get_transient(self::LOCK) && function_exists('spawn_cron')) {
             spawn_cron();
         }
+    }
+
+    /**
+     * Auto-vindecare: dacă o rulare a MURIT și a lăsat lock-ul (coada stă degeaba, dar
+     * panoul arată „rulează"), îl curățăm și repornim SINGURI - fără „Deblochează" manual.
+     * NU atingem o rulare care chiar e în curs (item „working" pornit recent), ca să nu
+     * producem un dublu. Apelată la fiecare poll de status + de watchdog-ul de 5 min.
+     * @return bool true dacă a recuperat o rulare moartă.
+     */
+    public function maybe_recover() {
+        if ((int) get_option('hzb_stopped', 0)) { return false; } // oprit voit de user
+        if (!get_transient(self::LOCK)) { return false; }          // nu e blocat
+
+        $q = $this->queue();
+        $has_working = false; $fresh_working = false;
+        foreach ($q as $item) {
+            if ($item['s'] !== 'working') { continue; }
+            $has_working = true;
+            $started = isset($item['started']) ? (int) $item['started'] : 0;
+            // „working" pornit de sub 20 min = rulare probabil VIE (generarea durează
+            // 1-3 min); n-o atingem, ca să nu iasă al doilea articol cu același titlu.
+            if ($started && (time() - $started) <= 20 * MINUTE_IN_SECONDS) { $fresh_working = true; break; }
+        }
+        if ($fresh_working) { return false; } // rulare reală în curs -> lăsăm în pace
+
+        // Lock fără rulare vie. Dacă nu e „working" deloc, dăm o mică grație (fereastra
+        // de ms dintre punerea lock-ului și marcarea itemului „working" în process_tick).
+        $lock_at = (int) get_option('hzb_lock_at', 0);
+        if (!$has_working && $lock_at && (time() - $lock_at) < 3 * MINUTE_IN_SECONDS) { return false; }
+
+        // Recuperare (identic cu „unlock", dar automat): scoatem lock-ul și repunem la
+        // rând articolele rămase „în lucru" dintr-o rulare moartă, apoi repornim coada.
+        delete_transient(self::LOCK);
+        delete_option('hzb_lock_at');
+        $n = 0;
+        foreach ($q as &$item) {
+            if ($item['s'] === 'working') { $item['s'] = 'pending'; $n++; }
+        }
+        unset($item);
+        if ($n > 0) { $this->save_queue($q); }
+        $this->kick(2);
+        return true;
     }
 
     /** Normalizare titlu pentru comparat dubluri (spații, majuscule). */
@@ -268,8 +331,11 @@ class HZ_Bulk {
             );
         }
 
-        // Aceeași plasă de siguranță ca la poll-ul din admin: dacă e treabă de făcut
-        // dar cronul a adormit (site fără trafic), îl repornim.
+        // Auto-vindecare: curăță o rulare moartă (lock rămas) și repornește coada -
+        // fără „Deblochează" manual. Rulează la FIECARE poll de status al aplicației.
+        $this->maybe_recover();
+        // Plasă de siguranță: dacă e treabă de făcut dar cronul a adormit (site fără
+        // trafic), îl repornim.
         if ($pending > 0 && !get_transient(self::LOCK)) { $this->kick(); }
 
         return array(
@@ -349,8 +415,8 @@ class HZ_Bulk {
         foreach ($q as $item) {
             if ($item['s'] === 'pending' || $item['s'] === 'working') { $pending++; }
         }
-        // Plasă de siguranță: dacă există lucru de făcut dar cronul a adormit
-        // (site fără trafic, event pierdut), îl repornim din poll-ul paginii.
+        // Auto-vindecare + plasă de siguranță: curăță o rulare moartă și repornește.
+        $this->maybe_recover();
         if ($pending > 0 && !get_transient(self::LOCK)) {
             $this->kick(); // nu face nimic dacă procesarea e oprită de user
         }
@@ -559,6 +625,7 @@ class HZ_Bulk {
         // v3.4.8: 30 min, nu 15. Un articol lent (API încet + descărcări de imagini)
         // depășea vechiul TTL, lock-ul expira și următorul cron intra peste el.
         set_transient(self::LOCK, 1, 30 * MINUTE_IN_SECONDS);
+        update_option('hzb_lock_at', time(), 'no'); // v3.8.3: momentul lock-ului, pt auto-vindecare
         if (function_exists('set_time_limit')) { @set_time_limit(600); }
 
         $q   = $this->queue();
