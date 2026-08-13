@@ -310,14 +310,29 @@
                         rows += '<tr>' +
                             '<td style="white-space:nowrap;color:#646970;">' + (e.t || '').substring(5, 16) + '</td>' +
                             '<td><a href="' + e.url + '" target="_blank" rel="noopener">' + e.title + '</a></td>' +
-                            '<td>' + (e.what || '') + '</td>' +
-                            '<td style="text-align:right;white-space:nowrap;">$' + Number(e.cost || 0).toFixed(4) + '</td>' +
-                            '</tr>';
+                            '<td>' + (e.what || '<span style="color:#a7aaad;">procesat înainte de jurnal</span>') + '</td>' +
+                            '<td style="text-align:right;white-space:nowrap;">' +
+                                (e.cost === null || typeof e.cost === 'undefined' ? '—' : '$' + Number(e.cost).toFixed(4)) + '</td>' +
+                            '<td style="text-align:right;white-space:nowrap;">' +
+                                (e.undo ? '<button type="button" class="button button-small hzr-undo-one" data-id="' + e.id + '">Anulează</button>' : '') +
+                            '</td></tr>';
                     });
                     $log.html('<h3 style="margin-bottom:6px;">Ce s-a procesat</h3>' +
-                        '<table class="widefat striped" style="max-width:900px;"><thead><tr>' +
+                        '<table class="widefat striped" style="max-width:1000px;"><thead><tr>' +
                         '<th style="width:110px;">Când</th><th>Articol</th><th>Ce s-a adăugat</th>' +
-                        '<th style="width:90px;text-align:right;">Cost</th></tr></thead><tbody>' + rows + '</tbody></table>');
+                        '<th style="width:90px;text-align:right;">Cost</th><th style="width:100px;"></th>' +
+                        '</tr></thead><tbody>' + rows + '</tbody></table>');
+
+                    // „Anulează" pe un singur articol (pune la loc conținutul din backup).
+                    $log.find('.hzr-undo-one').on('click', function () {
+                        var $b = $(this).prop('disabled', true).text('…');
+                        $.post(HZAdmin.ajaxUrl, {
+                            action: 'hzr_rollback', nonce: HZAdmin.nonce, scope: 'one', post_id: $b.data('id')
+                        }).done(function (r) {
+                            say(!!(r && r.success), (r && r.data && r.data.message) ? r.data.message : 'Eroare');
+                            refresh();
+                        }).fail(function () { $b.prop('disabled', false).text('Anulează'); });
+                    });
                 }
 
                 $('#hzr-toggle').data('stopped', d.stopped ? 1 : 0)

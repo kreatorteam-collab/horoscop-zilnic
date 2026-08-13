@@ -946,6 +946,48 @@ TXT;
         update_option('hzr_log', array_slice($log, 0, 25), 'no');
     }
 
+    /**
+     * Ultimele articole procesate, luate din BAZĂ (meta _hzr_done) — nu doar din
+     * jurnal: jurnalul a apărut în v3.8.2, dar tot ce s-a procesat înainte trebuie
+     * să se vadă. Detaliile (ce s-a adăugat, cost) se completează din jurnal, unde
+     * există; pentru cele vechi rămân goale.
+     */
+    public function recent_processed($limit = 15) {
+        global $wpdb;
+        $limit = max(1, min(50, (int) $limit));
+        $rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT pm.post_id, pm.meta_value AS done_at, p.post_title
+             FROM {$wpdb->postmeta} pm
+             INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id
+             WHERE pm.meta_key = %s
+             ORDER BY pm.meta_id DESC
+             LIMIT %d",
+            self::META_DONE, $limit
+        ), ARRAY_A);
+
+        $log = array();
+        foreach ((array) get_option('hzr_log', array()) as $e) {
+            if (!empty($e['id'])) { $log[(int) $e['id']] = $e; }
+        }
+
+        $out = array();
+        foreach ((array) $rows as $r) {
+            $id = (int) $r['post_id'];
+            $e  = isset($log[$id]) ? $log[$id] : array();
+            $out[] = array(
+                't'     => isset($e['t']) ? $e['t'] : (string) $r['done_at'],
+                'id'    => $id,
+                'title' => $r['post_title'] !== '' ? $r['post_title'] : ('#' . $id),
+                'url'   => (string) get_permalink($id),
+                'what'  => isset($e['what']) ? $e['what'] : '',
+                'cost'  => isset($e['cost']) ? (float) $e['cost'] : null,
+                // Dacă mai există backup, articolul poate fi pus la loc individual.
+                'undo'  => get_post_meta($id, self::META_BACKUP, true) !== '' ? 1 : 0,
+            );
+        }
+        return $out;
+    }
+
     private function bump_stats($cost) {
         $s = $this->day_state();
         $s['n'] = (int) $s['n'] + 1;
@@ -1133,7 +1175,7 @@ TXT;
             'idle'      => get_option('hzr_idle', ''),
             'error'     => get_option('hzr_last_error', ''),
             'counts'    => $this->counts(),
-            'log'       => array_slice((array) get_option('hzr_log', array()), 0, 15),
+            'log'       => $this->recent_processed(15),
             // „Lucrează acum": articolul aflat în procesare chiar în clipa asta.
             'current'   => get_transient('hzr_current') ?: null,
             'working'   => get_transient(self::LOCK) ? 1 : 0,
