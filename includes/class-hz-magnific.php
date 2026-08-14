@@ -128,8 +128,8 @@ class HZ_Magnific {
     }
 
     public static function daily_limit() {
-        $l = (int) get_option('hzb_daily_limit', 90);
-        return max(1, min(100, $l ?: 90));
+        $l = (int) get_option('hzb_daily_limit', 100);
+        return max(1, min(100, $l ?: 100));
     }
 
     public static function limit_reached() {

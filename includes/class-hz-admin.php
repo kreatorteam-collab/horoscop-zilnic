@@ -676,7 +676,7 @@ class HZ_Admin {
                     <tr>
                         <th scope="row"><label for="hzb_daily_limit"><?php esc_html_e('Limită descărcări/zi', 'horoscop-zilnic'); ?></label></th>
                         <td>
-                            <input type="number" name="hzb_daily_limit" id="hzb_daily_limit" min="1" max="100" value="<?php echo esc_attr((int) get_option('hzb_daily_limit', 90)); ?>" />
+                            <input type="number" name="hzb_daily_limit" id="hzb_daily_limit" min="1" max="100" value="<?php echo esc_attr((int) get_option('hzb_daily_limit', 100)); ?>" />
                             <p class="description"><?php esc_html_e('Contul Magnific permite ~100 descărcări de stock/zi, resetate la 00:00 UTC (03:00 ora României vara, 02:00 iarna). Limita e pe CONT, nu pe site: dacă aceeași cheie e folosită pe mai multe site-uri, împarte-o între ele (ex. 5 site-uri = câte 18).', 'horoscop-zilnic'); ?></p>
                         </td>
                     </tr>
