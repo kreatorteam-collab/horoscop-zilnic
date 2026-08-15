@@ -51,6 +51,89 @@ class HZ_Links {
     }
 
     /**
+     * True dacă host-ul e un site OFICIAL al statului român (whitelist extensibilă prin
+     * filtrul `hzb_official_ro_domains`). Orice subdomeniu `.gov.ro` e considerat oficial.
+     */
+    public static function is_official_ro($host) {
+        $host = strtolower(trim((string) $host));
+        $host = preg_replace('#^www\.#', '', $host);
+        if ($host === '') { return false; }
+        if (preg_match('#(^|\.)gov\.ro$#', $host)) { return true; } // *.gov.ro
+
+        $official = array(
+            'anaf.ro', 'insse.ro', 'cnas.ro', 'ms.ro', 'edu.ro', 'presidency.ro', 'just.ro',
+            'bnr.ro', 'monitoruloficial.ro', 'cdep.ro', 'senat.ro', 'cnpp.ro', 'anofm.ro',
+            'anpc.ro', 'ancom.ro', 'roaep.ro', 'mfinante.ro', 'cnsc.ro', 'ansvsa.ro',
+            'anm.ro', 'meteoromania.ro', 'inspectiamuncii.ro', 'politiaromana.ro',
+        );
+        $official = apply_filters('hzb_official_ro_domains', $official);
+        foreach ($official as $d) {
+            $d = strtolower((string) $d);
+            if ($d !== '' && ($host === $d || substr($host, -(strlen($d) + 1)) === '.' . $d)) { return true; }
+        }
+        return false;
+    }
+
+    /**
+     * Curăță referințele externe puse de MODEL (mai ales din căutarea web): scoate
+     * linkurile lui + numele de site-uri .ro, CU EXCEPȚIA site-urilor oficiale ale
+     * statului. Se rulează ÎNAINTE de apply() — linkurile CERUTE de user nu-s încă în
+     * articol, deci nu sunt atinse. Scop: pe advertoriale să nu punem link/mențiune
+     * către un site .ro concurent.
+     */
+    public static function strip_external($content) {
+        $content = (string) $content;
+
+        // 1) <a href>: păstrăm doar spre domenii oficiale ale statului; restul le
+        //    „despachetăm" (rămâne textul ancorei, dispare linkul).
+        $content = preg_replace_callback(
+            '#<a\b[^>]*\bhref\s*=\s*(["\'])(.*?)\1[^>]*>(.*?)</a>#is',
+            function ($m) {
+                $host = strtolower((string) parse_url(html_entity_decode($m[2]), PHP_URL_HOST));
+                return self::is_official_ro($host) ? $m[0] : $m[3];
+            },
+            $content
+        );
+
+        // 2) Linkuri Markdown [text](url) rămase -> doar textul, dacă nu-s oficiale.
+        $content = preg_replace_callback(
+            '#\[([^\]]+)\]\((https?://[^)\s]+)\)#i',
+            function ($m) {
+                $host = strtolower((string) parse_url($m[2], PHP_URL_HOST));
+                return self::is_official_ro($host) ? $m[0] : $m[1];
+            },
+            $content
+        );
+
+        // 3) URL-uri „la liber" în text (http(s)://...) către domenii neoficiale -> scoase.
+        $content = preg_replace_callback(
+            '#\bhttps?://[^\s<)"\']+#i',
+            function ($m) {
+                $host = strtolower((string) parse_url($m[0], PHP_URL_HOST));
+                return self::is_official_ro($host) ? $m[0] : '';
+            },
+            $content
+        );
+
+        // 4) Mențiuni de domenii .ro „la liber" în text (ex. „concurent.ro") -> scoase,
+        //    dacă nu-s oficiale.
+        $content = preg_replace_callback(
+            '#\b((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+ro)\b#i',
+            function ($m) {
+                return self::is_official_ro(strtolower($m[1])) ? $m[0] : '';
+            },
+            $content
+        );
+
+        // Curățenie după scoateri: paranteze goale, spații/punctuație duble.
+        $content = preg_replace('#\(\s*\)#', '', $content);
+        $content = preg_replace('#[ \t]{2,}#', ' ', $content);
+        $content = preg_replace('#\s+([,.;:!?])#', '$1', $content);
+        $content = preg_replace('#([,;:])\s*(?=[,.;:])#', '', $content);
+        return $content;
+    }
+
+    /**
      * Bucata de prompt care cere modelului să folosească ancorele în text.
      * NU-i dăm URL-urile: modelul scrie doar expresia, linkul îl punem noi.
      */

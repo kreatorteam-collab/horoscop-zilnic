@@ -723,7 +723,10 @@ class HZ_Bulk {
         if ($web_on === 1) {
             $brief .= "\n\nAstăzi este " . wp_date('j F Y') . ". Caută informații actuale înainte să scrii, "
                 . "folosește DOAR date verificate în surse și nu inventa cifre, prețuri sau termene. "
-                . "Când citezi o cifră recentă, menționează în text sursa (numele publicației).";
+                . "NU insera linkuri sau adrese de site (URL) în articol și NU menționa nume de site-uri "
+                . ".ro (ex. „exemplu.ro”), cu excepția instituțiilor oficiale ale statului. Când citezi o "
+                . "cifră recentă, spune tipul sursei (ex. „date oficiale”, „un studiu de specialitate”), "
+                . "fără să dai numele domeniului sau linkul.";
         }
         $words = (isset($item['len']) && (int) $item['len'] > 0)
             ? (int) $item['len']
@@ -764,6 +767,11 @@ class HZ_Bulk {
             $item['cost'] = $cost;
             return $item;
         }
+
+        // 1a) Curățăm referințele externe puse de MODEL (link-uri + nume de site-uri .ro
+        // concurente, mai ales din căutarea web); păstrăm doar site-urile OFICIALE ale
+        // statului. Rulăm ÎNAINTE de apply(), ca linkurile CERUTE de user să nu fie atinse.
+        if (class_exists('HZ_Links')) { $content = HZ_Links::strip_external($content); }
 
         // 1b) Linkurile cerute din panoul central. Se pun ÎNAINTE de imagini, ca
         // ancora să fie căutată doar în text, nu în legendele figurilor.
