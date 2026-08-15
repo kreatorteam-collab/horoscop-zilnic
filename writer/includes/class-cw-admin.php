@@ -91,7 +91,7 @@ class CW_Admin {
     public function render_page() {
         if (!current_user_can('manage_options')) { return; }
 
-        $allowed  = array('writer', 'horoscop', 'vreme', 'bulk', 'refresh');
+        $allowed  = array('writer', 'horoscop', 'vreme', 'bulk');
         $tab      = (isset($_GET['tab']) && in_array($_GET['tab'], $allowed, true)) ? $_GET['tab'] : 'writer';
         $base_url = admin_url('options-general.php?page=claude-writer');
         ?>
@@ -103,7 +103,6 @@ class CW_Admin {
                 <a href="<?php echo esc_url($base_url . '&tab=horoscop'); ?>" class="nav-tab <?php echo $tab === 'horoscop' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Horoscop Zilnic', 'claude-writer'); ?></a>
                 <a href="<?php echo esc_url($base_url . '&tab=vreme'); ?>" class="nav-tab <?php echo $tab === 'vreme' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Vreme', 'claude-writer'); ?></a>
                 <a href="<?php echo esc_url($base_url . '&tab=bulk'); ?>" class="nav-tab <?php echo $tab === 'bulk' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Articole Bulk', 'claude-writer'); ?></a>
-                <a href="<?php echo esc_url($base_url . '&tab=refresh'); ?>" class="nav-tab <?php echo $tab === 'refresh' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Refresh conținut', 'claude-writer'); ?></a>
             </h2>
 
         <?php
@@ -128,14 +127,6 @@ class CW_Admin {
             echo '</div>';
             return;
         }
-        if ($tab === 'refresh') {
-            if (class_exists('HZ_Admin')) {
-                (new HZ_Admin())->render_refresh_tab();
-            }
-            echo '</div>';
-            return;
-        }
-
         $models  = CW_Models::all();
         $by      = get_option('cw_usage_by_model', array());
         $total   = (float) get_option('cw_cost_total', 0);

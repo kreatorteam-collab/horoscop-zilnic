@@ -28,7 +28,7 @@ class HZ_Remote {
     }
 
     public function register() {
-        $routes = array('info', 'enqueue', 'status', 'control', 'settings', 'refresh');
+        $routes = array('info', 'enqueue', 'status', 'control', 'settings');
         foreach ($routes as $route) {
             register_rest_route('hz/v1', '/' . $route, array(
                 'methods'             => 'POST',
@@ -318,81 +318,6 @@ class HZ_Remote {
                 'magnific_limit' => HZ_Magnific::daily_limit(),
             ),
         );
-    }
-
-    /**
-     * Modulul „Refresh conținut" de la distanță.
-     * Body: { action: 'test'|'undo_last'|'settings', post_id?, set?: {rewrite, rewrite_ext, enabled, daily_limit} }
-     *
-     * `test` procesează UN articol pe loc (același lucru ca butonul din admin) și
-     * întoarce rezultatul — util ca să verifici rescrierea completă pe un articol
-     * înainte de a porni procesarea zilnică pe tot site-ul.
-     */
-    public function handle_refresh(WP_REST_Request $req) {
-        $data = $this->auth($req);
-        if ($data instanceof WP_REST_Response) { return $data; }
-        if (!class_exists('HZ_Refresh')) {
-            return new WP_REST_Response(array('error' => 'no_module'), 400);
-        }
-
-        $action  = isset($data['action']) ? sanitize_key((string) $data['action']) : '';
-        $refresh = new HZ_Refresh();
-
-        if ($action === 'settings') {
-            $set = isset($data['set']) && is_array($data['set']) ? $data['set'] : array();
-            $map = array(
-                'enabled'      => array('hzr_enabled', 0, 1),
-                'rewrite'      => array('hzr_rewrite', 0, 1),
-                'rewrite_ext'  => array('hzr_rewrite_ext', 0, 1),
-                'daily_limit'  => array('hzr_daily_limit', 1, 500),
-                'gap'          => array('hzr_gap', 30, 3600),
-            );
-            $changed = array();
-            foreach ($map as $field => $cfg) {
-                if (!isset($set[$field]) || $set[$field] === '') { continue; }
-                list($opt, $min, $max) = $cfg;
-                update_option($opt, max($min, min($max, (int) $set[$field])), 'no');
-                $changed[] = $field;
-            }
-            return array('ok' => true, 'changed' => $changed, 'counts' => $refresh->counts());
-        }
-
-        if ($action === 'test') {
-            if (function_exists('set_time_limit')) { @set_time_limit(300); }
-            $id = isset($data['post_id']) ? absint($data['post_id']) : 0;
-            $post = $id ? get_post($id) : $refresh->next_candidate();
-            if (!$post) {
-                return array('ok' => false, 'message' => 'Niciun articol eligibil.',
-                             'reasons' => $refresh->last_reasons);
-            }
-            if ($id) {
-                $reason = $refresh->skip_reason($post);
-                if ($reason !== '') {
-                    return array('ok' => false, 'message' => 'Articolul nu e eligibil: ' . $reason);
-                }
-            }
-            $res = $refresh->process_post($post);
-            $res['post_id'] = (int) $post->ID;
-            $res['url']     = get_permalink($post->ID);
-            return $res;
-        }
-
-        if ($action === 'undo_last') {
-            global $wpdb;
-            // Ultimul articol procesat = cel mai nou meta _hzr_done (ca în admin).
-            $last = isset($data['post_id']) ? absint($data['post_id']) : 0;
-            if (!$last) {
-                $last = (int) $wpdb->get_var($wpdb->prepare(
-                    "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key=%s ORDER BY meta_id DESC LIMIT 1",
-                    '_hzr_done'
-                ));
-            }
-            if (!$last) { return array('ok' => false, 'message' => 'Nu am ce anula.'); }
-            return array('ok' => (bool) $refresh->restore($last), 'post_id' => $last,
-                         'title' => get_the_title($last));
-        }
-
-        return new WP_REST_Response(array('error' => 'bad_action'), 400);
     }
 
     /** start | stop | retry | clear */
