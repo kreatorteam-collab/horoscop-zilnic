@@ -514,7 +514,8 @@ class HZ_Bulk {
             if (empty($img['ids'])) {
                 $note = $img['note'];
                 // Cotă terminată în timpul lotului: ne oprim, restul rămân pentru mâine.
-                if (stripos($note, 'epuizat') !== false || stripos($note, 'Limita') !== false) {
+                // v3.10.0: pe flagul explicit, nu pe potrivire de text în mesajul de eroare.
+                if (!empty($img['blocked'])) {
                     $left++;
                     break;
                 }
@@ -647,23 +648,23 @@ class HZ_Bulk {
             return;
         }
 
-        // Vrem imagini la fiecare articol: dacă limita zilnică Magnific e atinsă,
-        // punem coada pe pauză până mâine în loc să publicăm articole fără poze.
+        // NU scriem articole fără poze. Dacă sursa de imagini nu poate livra (cotă
+        // atinsă, refuz al contului sau cheie lipsă), coada așteaptă — articolul nici
+        // măcar nu se generează, ca să nu plătim un text pe care nu-l putem publica.
         $images = $this->images_for($q[$idx]);
-        if ($images > 0 && HZ_Magnific::has_key() && HZ_Magnific::limit_reached()) {
-            // Cota Magnific se resetează la 00:00 UTC — reluăm exact atunci, nu la
-            // miezul nopții local (în România ar însemna 2-3 ore de așteptare inutilă
-            // sau, invers, o repornire prea devreme care lovește iar refuzul).
-            $t = HZ_Magnific::next_reset_ts();
-            update_option('hzb_paused_reason', sprintf(
-                'Cota zilnică de descărcări Magnific e atinsă — coada continuă singură la %s (resetul e la 00:00 UTC).',
-                wp_date('d.m.Y H:i', $t)
-            ), 'no');
-            delete_transient(self::LOCK);
-            if (!wp_next_scheduled(self::HOOK)) {
-                wp_schedule_single_event($t, self::HOOK);
+        if ($images > 0) {
+            $block = self::images_blocked();
+            if ($block !== null) {
+                update_option('hzb_paused_reason', $block['msg'], 'no');
+                delete_transient(self::LOCK);
+                // Cota se resetează singură la 00:00 UTC, deci ne reprogramăm exact
+                // atunci. Cheia lipsă NU se rezolvă de la sine: acolo coada stă până o
+                // pune userul (salvarea cheii repornește coada, vezi HZ_Admin).
+                if ($block['at'] && !wp_next_scheduled(self::HOOK)) {
+                    wp_schedule_single_event($block['at'], self::HOOK);
+                }
+                return;
             }
-            return;
         }
         delete_option('hzb_paused_reason');
 
@@ -704,87 +705,107 @@ class HZ_Bulk {
 
         // 1) Conținutul: același șablon și system prompt editorial ca butonul
         // „Articol nou" din editor — stil deja pus la punct per site.
-        $links = (isset($item['links']) && is_array($item['links'])) ? $item['links'] : array();
-
-        $brief = $title;
-        if (trim((string) $item['extra']) !== '') {
-            $brief .= "\n\nInstrucțiuni suplimentare pentru acest lot de articole:\n" . trim((string) $item['extra']);
-        }
-        // Ancorele cerute din panoul central intră în brief: modelul le scrie în text,
-        // iar linkul propriu-zis îl punem noi după generare (HZ_Links).
-        if (!empty($links) && class_exists('HZ_Links')) {
-            $brief .= HZ_Links::prompt_hint($links);
-        }
-        // Cu căutare web îi spunem ce zi e (altfel „acum" înseamnă data antrenamentului)
-        // și îi cerem explicit să nu inventeze cifre.
-        $web_on = (isset($item['web']) && $item['web'] !== null && $item['web'] !== '')
-            ? (int) $item['web']
-            : (int) get_option('cw_web_search', 0);
-        if ($web_on === 1) {
-            $brief .= "\n\nAstăzi este " . wp_date('j F Y') . ". Caută informații actuale înainte să scrii, "
-                . "folosește DOAR date verificate în surse și nu inventa cifre, prețuri sau termene. "
-                . "NU insera linkuri sau adrese de site (URL) în articol și NU menționa nume de site-uri "
-                . ".ro (ex. „exemplu.ro”), cu excepția instituțiilor oficiale ale statului. Când citezi o "
-                . "cifră recentă, spune tipul sursei (ex. „date oficiale”, „un studiu de specialitate”), "
-                . "fără să dai numele domeniului sau linkul.";
-        }
-        $words = (isset($item['len']) && (int) $item['len'] > 0)
-            ? (int) $item['len']
-            : (int) get_option('hzb_length', 1000);
-        $tpl = get_option('cw_article_prompt', CW_Admin::default_article_prompt());
-        $prompt = str_replace(
-            array('{{continut}}', '{{cuvinte}}'),
-            array($brief, (string) max(300, $words)),
-            $tpl
-        );
-
-        // Căutare web doar pentru ARTICOL (nu și pentru micro-apelul de traducere a
-        // interogării de imagini), și doar dacă lotul a cerut-o explicit.
-        $web = (isset($item['web']) && $item['web'] !== null && $item['web'] !== '') ? (int) $item['web'] : null;
-        $web_filter = null;
-        if ($web !== null) {
-            $web_filter = function () use ($web) { return $web; };
-            add_filter('cw_web_search', $web_filter, 99);
-        }
-
-        $result = CW_API::generate($model, $prompt);
-
-        if ($web_filter) { remove_filter('cw_web_search', $web_filter, 99); }
-
-        if (is_wp_error($result)) {
-            $item['s']   = 'error';
-            $item['err'] = $result->get_error_message();
-            return $item;
-        }
-        $cost += (float) $result['cost'];
-        $searches = isset($result['searches']) ? (int) $result['searches'] : 0;
-        $queries  = isset($result['queries']) ? (int) $result['queries'] : 0;
-
-        $content = $this->clean_html($result['text']);
-        if (strlen($content) < 500) {
-            $item['s']   = 'error';
-            $item['err'] = 'Conținut generat prea scurt (' . strlen($content) . ' caractere).';
-            $item['cost'] = $cost;
-            return $item;
-        }
-
-        // 1a) Curățăm referințele externe puse de MODEL (link-uri + nume de site-uri .ro
-        // concurente, mai ales din căutarea web); păstrăm doar site-urile OFICIALE ale
-        // statului. Rulăm ÎNAINTE de apply(), ca linkurile CERUTE de user să nu fie atinse.
-        if (class_exists('HZ_Links')) { $content = HZ_Links::strip_external($content); }
-
-        // 1b) Linkurile cerute din panoul central. Se pun ÎNAINTE de imagini, ca
-        // ancora să fie căutată doar în text, nu în legendele figurilor.
+        // v3.10.0: dacă o rulare anterioară a scris textul dar s-a oprit fiindcă nu mai
+        // erau poze, îl refolosim — altfel am plăti de două ori același articol.
+        $content   = '';
         $link_note = '';
-        if (!empty($links) && class_exists('HZ_Links')) {
-            $applied     = HZ_Links::apply($content, $links);
-            $content     = $applied['content'];
-            $item['lnk'] = array(
-                'total'  => (int) $applied['total'],
-                'done'   => (int) $applied['done'],
-                'forced' => (int) $applied['forced'],
+        $searches  = 0;
+        $queries   = 0;
+        $saved     = (isset($item['gen']) && is_array($item['gen']) && !empty($item['gen']['html']))
+            ? $item['gen']
+            : null;
+        if ($saved) {
+            // Linkurile cerute sunt deja aplicate în textul salvat; NU le mai trecem o
+            // dată prin HZ_Links (ar insera dubluri) și nici prin strip_external.
+            $content   = (string) $saved['html'];
+            $link_note = isset($saved['ln']) ? (string) $saved['ln'] : '';
+            $searches  = isset($saved['s']) ? (int) $saved['s'] : 0;
+            $queries   = isset($saved['q']) ? (int) $saved['q'] : 0;
+            $cost     += isset($saved['c']) ? (float) $saved['c'] : 0.0;
+            if (isset($saved['lnk'])) { $item['lnk'] = $saved['lnk']; }
+        } else {
+            $links = (isset($item['links']) && is_array($item['links'])) ? $item['links'] : array();
+
+            $brief = $title;
+            if (trim((string) $item['extra']) !== '') {
+                $brief .= "\n\nInstrucțiuni suplimentare pentru acest lot de articole:\n" . trim((string) $item['extra']);
+            }
+            // Ancorele cerute din panoul central intră în brief: modelul le scrie în text,
+            // iar linkul propriu-zis îl punem noi după generare (HZ_Links).
+            if (!empty($links) && class_exists('HZ_Links')) {
+                $brief .= HZ_Links::prompt_hint($links);
+            }
+            // Cu căutare web îi spunem ce zi e (altfel „acum" înseamnă data antrenamentului)
+            // și îi cerem explicit să nu inventeze cifre.
+            $web_on = (isset($item['web']) && $item['web'] !== null && $item['web'] !== '')
+                ? (int) $item['web']
+                : (int) get_option('cw_web_search', 0);
+            if ($web_on === 1) {
+                $brief .= "\n\nAstăzi este " . wp_date('j F Y') . ". Caută informații actuale înainte să scrii, "
+                    . "folosește DOAR date verificate în surse și nu inventa cifre, prețuri sau termene. "
+                    . "NU insera linkuri sau adrese de site (URL) în articol și NU menționa nume de site-uri "
+                    . ".ro (ex. „exemplu.ro”), cu excepția instituțiilor oficiale ale statului. Când citezi o "
+                    . "cifră recentă, spune tipul sursei (ex. „date oficiale”, „un studiu de specialitate”), "
+                    . "fără să dai numele domeniului sau linkul.";
+            }
+            $words = (isset($item['len']) && (int) $item['len'] > 0)
+                ? (int) $item['len']
+                : (int) get_option('hzb_length', 1000);
+            $tpl = get_option('cw_article_prompt', CW_Admin::default_article_prompt());
+            $prompt = str_replace(
+                array('{{continut}}', '{{cuvinte}}'),
+                array($brief, (string) max(300, $words)),
+                $tpl
             );
-            $link_note = HZ_Links::note($applied);
+
+            // Căutare web doar pentru ARTICOL (nu și pentru micro-apelul de traducere a
+            // interogării de imagini), și doar dacă lotul a cerut-o explicit.
+            $web = (isset($item['web']) && $item['web'] !== null && $item['web'] !== '') ? (int) $item['web'] : null;
+            $web_filter = null;
+            if ($web !== null) {
+                $web_filter = function () use ($web) { return $web; };
+                add_filter('cw_web_search', $web_filter, 99);
+            }
+
+            $result = CW_API::generate($model, $prompt);
+
+            if ($web_filter) { remove_filter('cw_web_search', $web_filter, 99); }
+
+            if (is_wp_error($result)) {
+                $item['s']   = 'error';
+                $item['err'] = $result->get_error_message();
+                return $item;
+            }
+            $cost += (float) $result['cost'];
+            $searches = isset($result['searches']) ? (int) $result['searches'] : 0;
+            $queries  = isset($result['queries']) ? (int) $result['queries'] : 0;
+
+            $content = $this->clean_html($result['text']);
+            if (strlen($content) < 500) {
+                $item['s']   = 'error';
+                $item['err'] = 'Conținut generat prea scurt (' . strlen($content) . ' caractere).';
+                $item['cost'] = $cost;
+                return $item;
+            }
+
+            // 1a) Curățăm referințele externe puse de MODEL (link-uri + nume de site-uri .ro
+            // concurente, mai ales din căutarea web); păstrăm doar site-urile OFICIALE ale
+            // statului. Rulăm ÎNAINTE de apply(), ca linkurile CERUTE de user să nu fie atinse.
+            if (class_exists('HZ_Links')) { $content = HZ_Links::strip_external($content); }
+
+            // 1b) Linkurile cerute din panoul central. Se pun ÎNAINTE de imagini, ca
+            // ancora să fie căutată doar în text, nu în legendele figurilor.
+            $link_note = '';
+            if (!empty($links) && class_exists('HZ_Links')) {
+                $applied     = HZ_Links::apply($content, $links);
+                $content     = $applied['content'];
+                $item['lnk'] = array(
+                    'total'  => (int) $applied['total'],
+                    'done'   => (int) $applied['done'],
+                    'forced' => (int) $applied['forced'],
+                );
+                $link_note = HZ_Links::note($applied);
+            }
         }
 
         // 2) Imaginile: interogare de căutare în engleză (stocul e indexat în
@@ -794,6 +815,27 @@ class HZ_Bulk {
         $att_ids  = $img['ids'];
         $img_note = $img['note'];
         $cost    += $img['cost'];
+
+        // Cota s-a golit ÎNTRE verificarea de dinainte de generare și acum (o poate
+        // consuma alt site cu aceeași cheie, cât scriem noi 1-3 minute). Nu publicăm
+        // articolul fără poză: îl punem la loc la rând CU TEXTUL PĂSTRAT, iar coada se
+        // oprește la tick-ul următor și revine la resetul cotei.
+        if ($images > 0 && empty($att_ids) && !empty($img['blocked'])) {
+            $item['s']    = 'pending';
+            $item['cost'] = $cost;
+            $item['err']  = '';
+            $item['gen']  = array(
+                'html' => $content,
+                'ln'   => $link_note,
+                's'    => $searches,
+                'q'    => $queries,
+                'c'    => $cost,
+                'lnk'  => isset($item['lnk']) ? $item['lnk'] : null,
+            );
+            $item['note'] = 'Text gata, aștept poze: ' . $img_note;
+            return $item;
+        }
+        unset($item['gen']); // publicăm acum, textul salvat nu mai e necesar
 
         // Imaginile suplimentare (după cover) intră în corp, distribuite după H2-uri.
         if (count($att_ids) > 1) {
@@ -875,6 +917,37 @@ class HZ_Bulk {
         return $item;
     }
 
+    /**
+     * Poate livra Magnific o poză acum? null = da. Altfel array('msg', 'at'), unde
+     * `at` e momentul în care are rost să reîncercăm singuri (0 = nu se rezolvă de
+     * la sine). Un articol fără poză nu se publică, deci întrebarea se pune ÎNAINTE
+     * de generare — nu după ce am plătit textul.
+     */
+    public static function images_blocked() {
+        if (!HZ_Magnific::has_key()) {
+            return array(
+                'msg' => 'Nu e configurată cheia API Magnific, deci articolele ar ieși fără poze — '
+                       . 'coada așteaptă. Pune cheia în setări (tab Articole Bulk) și pornește singură.',
+                'at'  => 0,
+            );
+        }
+        if (HZ_Magnific::limit_reached()) {
+            // Cota Magnific se resetează la 00:00 UTC — reluăm exact atunci, nu la
+            // miezul nopții local (în România ar însemna 2-3 ore de așteptare inutilă
+            // sau, invers, o repornire prea devreme care lovește iar refuzul).
+            $t = HZ_Magnific::next_reset_ts();
+            return array(
+                'msg' => sprintf(
+                    'Cota zilnică de descărcări Magnific e atinsă — nu scriem articole fără poze. '
+                    . 'Coada continuă singură la %s (resetul e la 00:00 UTC).',
+                    wp_date('d.m.Y H:i', $t)
+                ),
+                'at'  => $t,
+            );
+        }
+        return null;
+    }
+
     /** Câte imagini vrea acest articol: override din lot, altfel setarea site-ului. */
     private function images_for($item) {
         if (isset($item['img']) && $item['img'] !== null && $item['img'] !== '') {
@@ -890,10 +963,13 @@ class HZ_Bulk {
      * la completarea ulterioară a articolelor rămase fără poză.
      */
     private function fetch_images($title, $model, $limit) {
-        $out = array('ids' => array(), 'note' => '', 'cost' => 0.0);
+        // `blocked` = n-avem DE UNDE lua poze (cotă/credite/cheie), spre deosebire de
+        // „am căutat și n-am găsit". Doar primul caz oprește publicarea articolului.
+        $out = array('ids' => array(), 'note' => '', 'cost' => 0.0, 'blocked' => false);
         if ($limit < 1) { return $out; }
         if (!HZ_Magnific::has_key()) {
-            $out['note'] = 'cheia API Magnific nu e configurată în setările de mai jos';
+            $out['note']    = 'cheia API Magnific nu e configurată în setările de mai jos';
+            $out['blocked'] = true;
             return $out;
         }
 
@@ -920,7 +996,10 @@ class HZ_Bulk {
                 $out['note'] = $att->get_error_message();
                 // Cota locală SAU cea a contului e goală: nu mai încercăm nimic azi
                 // (tick-ul următor pune coada pe pauză până mâine).
-                if (in_array($att->get_error_code(), array('hzb_limit', 'hzb_credits'), true)) { break; }
+                if (in_array($att->get_error_code(), array('hzb_limit', 'hzb_credits'), true)) {
+                    $out['blocked'] = true;
+                    break;
+                }
                 continue; // o resursă coruptă nu oprește restul
             }
             HZ_Magnific::mark_used($r['id']);
