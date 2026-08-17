@@ -172,6 +172,8 @@ class HZ_Remote {
             'images' => isset($data['images']) ? $data['images'] : '',
             // Căutare web pentru lotul ăsta: absent = setarea site-ului.
             'web'    => isset($data['web']) ? $data['web'] : '',
+            // Data de publicare pentru lotul ăsta: absent = setarea site-ului, 0 = azi, 1 = backdate.
+            'random_date' => isset($data['random_date']) ? $data['random_date'] : '',
             // Categoria lipsă se creează DOAR dacă panoul cere explicit.
             'create_category' => !empty($data['create_category']),
         ));

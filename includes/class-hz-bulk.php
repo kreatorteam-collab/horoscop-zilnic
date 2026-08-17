@@ -210,6 +210,9 @@ class HZ_Bulk {
         $created = array();
         // Căutare web per lot: null = las setarea site-ului, 0/1 = o forțez.
         $web = (isset($opts['web']) && $opts['web'] !== '' && $opts['web'] !== null) ? (int) !!$opts['web'] : null;
+        // Data de publicare per lot: null = las setarea site-ului, 0 = data curentă (la zi),
+        // 1 = backdatare random (împrăștiate în ultima lună).
+        $rd = (isset($opts['random_date']) && $opts['random_date'] !== '' && $opts['random_date'] !== null) ? (int) !!$opts['random_date'] : null;
 
         $q     = $this->queue();
         $known = array();
@@ -257,6 +260,7 @@ class HZ_Bulk {
                 'len'     => $len > 0 ? max(300, $len) : 0,
                 'img'     => $img,
                 'web'     => $web,
+                'rd'      => $rd,
                 'lnk'     => array('total' => count($links), 'done' => 0, 'forced' => 0),
             );
             $added++;
@@ -853,7 +857,7 @@ class HZ_Bulk {
         );
         // Dată random în luna curentă + luna trecută (backdatare, ca articolele bulk să
         // nu aibă toate același timestamp). Opțional (hzb_random_date, implicit pornit).
-        $rand = $this->random_publish_date();
+        $rand = $this->random_publish_date($item);
         if ($rand) {
             $postarr['post_date']     = $rand['local'];
             $postarr['post_date_gmt'] = $rand['gmt'];
@@ -1071,8 +1075,12 @@ class HZ_Bulk {
      * site-ului. Întoarce array('local','gmt') sau null dacă opțiunea e dezactivată.
      * Toate datele sunt în trecut → articolele se publică imediat, dar backdatate.
      */
-    private function random_publish_date() {
-        if (!(int) get_option('hzb_random_date', 1)) { return null; }
+    private function random_publish_date($item = null) {
+        // Override per lot (rd): null/absent = setarea site-ului; 0 = data curentă; 1 = backdate.
+        $on = (is_array($item) && isset($item['rd']) && $item['rd'] !== null && $item['rd'] !== '')
+            ? (int) $item['rd']
+            : (int) get_option('hzb_random_date', 1);
+        if (!$on) { return null; }
         $tz = wp_timezone();
         try {
             $now   = new DateTimeImmutable('now', $tz);
