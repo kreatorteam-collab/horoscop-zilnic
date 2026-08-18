@@ -94,8 +94,16 @@ class HZ_Remote {
             'ai_limit_hit'    => class_exists('CW_Usage') ? CW_Usage::limit_reached() : false,
             'ai_model'        => class_exists('CW_API') ? CW_API::resolve_model('') : '',
             'ai_model_set'    => (string) get_option('cw_default_model', ''),
-            // Modelele proprii ale conținutului zilnic (gol = folosesc modelul implicit).
+            // Conținutul zilnic: pornit/oprit, ora, ultima rulare și modelul propriu
+            // (gol = folosește modelul implicit al site-ului). Panoul poate spune
+            // astfel CARE site-uri consumă zilnic, nu doar ce model au setat.
+            'horoscope_on'    => (int) get_option('hz_enabled', 0),
+            'horoscope_hour'  => (int) get_option('hz_hour', 7),
+            'horoscope_last'  => (string) get_option('hz_last_run', ''),
             'horoscope_model' => (string) get_option('hz_model', ''),
+            'weather_on'      => (int) get_option('hzw_enabled', 0),
+            'weather_hour'    => (int) get_option('hzw_hour', 8),
+            'weather_last'    => (string) get_option('hzw_last_run', ''),
             'weather_model'   => (string) get_option('hzw_model', ''),
             'ai_month_cost'   => class_exists('CW_Usage') ? round((float) CW_Usage::month_cost(), 4) : 0,
             'ai_month_limit'  => (float) get_option('cw_monthly_cost_limit', 0),
