@@ -125,7 +125,7 @@ class HZ_Links {
      * articol, deci nu sunt atinse. Scop: pe advertoriale să nu punem link/mențiune
      * către un site .ro concurent.
      */
-    public static function strip_external($content) {
+    public static function strip_external($content, $strip_mentions = true) {
         $content = (string) $content;
 
         // 0) CITĂRILE căutării web. Se scot ÎNAINTE de orice, indiferent de domeniu.
@@ -168,14 +168,18 @@ class HZ_Links {
         );
 
         // 4) Mențiuni de domenii .ro „la liber" în text (ex. „concurent.ro") -> scoase,
-        //    dacă nu-s oficiale.
-        $content = preg_replace_callback(
-            '#\b((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+ro)\b#i',
-            function ($m) {
-                return self::is_official_ro(strtolower($m[1])) ? $m[0] : '';
-            },
-            $content
-        );
+        //    dacă nu-s oficiale. Pasul se poate sări ($strip_mentions = false): la
+        //    rescrierea prin model mențiunile le-a scos deja modelul, cu fraza refăcută,
+        //    iar ștergerea oarbă ar ciunti o frază corectă.
+        if ($strip_mentions) {
+            $content = preg_replace_callback(
+                '#\b((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+ro)\b#i',
+                function ($m) {
+                    return self::is_official_ro(strtolower($m[1])) ? $m[0] : '';
+                },
+                $content
+            );
+        }
 
         // Curățenie după scoateri: paranteze goale, spații/punctuație duble.
         // „preluate de Ziarul Financiar și News.ro." -> pasul 4 scotea domeniul și rămânea

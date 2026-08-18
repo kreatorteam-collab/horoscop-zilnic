@@ -28,7 +28,7 @@ class HZ_Remote {
     }
 
     public function register() {
-        $routes = array('info', 'enqueue', 'status', 'control', 'settings');
+        $routes = array('info', 'enqueue', 'status', 'control', 'settings', 'rewrite');
         foreach ($routes as $route) {
             register_rest_route('hz/v1', '/' . $route, array(
                 'methods'             => 'POST',
@@ -333,5 +333,50 @@ class HZ_Remote {
         }
         $bulk = new HZ_Bulk();
         return array('ok' => true, 'message' => $bulk->control($action));
+    }
+
+    /**
+     * Rescrie articolele publicate care au rămas cu citări de la căutarea web.
+     * Body: { ids: [12,34] | scan: N, model, dry: 0|1, restore: 0|1 }
+     *
+     * Fără `ids` întoarce doar inventarul (câte articole are site-ul de curățat), ca
+     * panoul să poată face un tur al flotei fără să scrie nimic. Un apel = cel mult
+     * 3 articole: rescrierea durează zeci de secunde, iar cererea trebuie să se
+     * încheie înainte de timeout-ul serverului.
+     */
+    public function handle_rewrite(WP_REST_Request $req) {
+        $data = $this->auth($req);
+        if ($data instanceof WP_REST_Response) { return $data; }
+        if (!class_exists('HZ_Rewrite')) {
+            return new WP_REST_Response(array('error' => 'no_module'), 400);
+        }
+
+        $ids = isset($data['ids']) && is_array($data['ids']) ? array_map('intval', $data['ids']) : array();
+        // scan=N: ia singur primele N articole cu citări (nu mai trebuie lista din panou).
+        if (empty($ids) && isset($data['scan'])) {
+            $ids = HZ_Rewrite::find_posts((int) $data['scan']);
+        }
+        if (empty($ids)) {
+            return array('ok' => true, 'pending' => HZ_Rewrite::count_posts(), 'done' => array());
+        }
+        $ids = array_slice(array_values(array_unique(array_filter($ids))), 0, 3);
+
+        if (!empty($data['restore'])) {
+            $out = array();
+            foreach ($ids as $id) { $out[] = HZ_Rewrite::restore($id); }
+            return array('ok' => true, 'done' => $out, 'pending' => HZ_Rewrite::count_posts());
+        }
+
+        $model = isset($data['model']) ? sanitize_text_field((string) $data['model']) : '';
+        $dry   = !empty($data['dry']);
+        $out   = array();
+        $cost  = 0.0;
+        foreach ($ids as $id) {
+            $r = HZ_Rewrite::rewrite($id, $model, $dry);
+            $cost += isset($r['cost']) ? (float) $r['cost'] : 0.0;
+            $out[] = $r;
+        }
+        return array('ok' => true, 'done' => $out, 'cost' => round($cost, 5),
+            'pending' => HZ_Rewrite::count_posts());
     }
 }
