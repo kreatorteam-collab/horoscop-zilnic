@@ -110,7 +110,7 @@ class HZ_Remote {
             'categories'      => $cats,
             'default_category'=> (int) get_option('default_category', 1),
             'defaults'        => array(
-                'images' => (int) get_option('hzb_images', 2),
+                'images' => (int) get_option('hzb_images', 1),
                 'length' => (int) get_option('hzb_length', 1000),
                 'gap'    => (int) get_option('hzb_gap', 120),
             ),
@@ -287,7 +287,7 @@ class HZ_Remote {
             'monthly_limit'        => array('cw_monthly_cost_limit', 0, 10000),
             'web_search_max'       => array('cw_web_search_max', 1, 10),
             'magnific_daily_limit' => array('hzb_daily_limit', 1, 1000),
-            'images'               => array('hzb_images', 0, 3),
+            'images'               => array('hzb_images', 0, HZ_Bulk::MAX_IMAGES),
             'length'               => array('hzb_length', 300, 4000),
             'gap'                  => array('hzb_gap', 5, 3600),
         );

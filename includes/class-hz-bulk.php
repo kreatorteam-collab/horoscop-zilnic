@@ -205,7 +205,7 @@ class HZ_Bulk {
         $extra  = mb_substr(isset($opts['extra']) ? (string) $opts['extra'] : '', 0, 2000);
         $batch  = isset($opts['batch']) ? substr(preg_replace('/[^a-zA-Z0-9_\-]/', '', (string) $opts['batch']), 0, 40) : '';
         $len    = isset($opts['length']) ? (int) $opts['length'] : 0;
-        $img    = isset($opts['images']) && $opts['images'] !== '' ? max(0, min(3, (int) $opts['images'])) : null;
+        $img    = isset($opts['images']) && $opts['images'] !== '' ? max(0, min(self::MAX_IMAGES, (int) $opts['images'])) : null;
         $mkcat  = !empty($opts['create_category']);
         $created = array();
         // Căutare web per lot: null = las setarea site-ului, 0/1 = o forțez.
@@ -500,7 +500,7 @@ class HZ_Bulk {
         }
         if (function_exists('set_time_limit')) { @set_time_limit(300); }
 
-        $images = max(1, min(3, (int) get_option('hzb_images', 2)));
+        $images = max(1, min(self::MAX_IMAGES, (int) get_option('hzb_images', 1)));
         $batch  = 5; // per apas; userul mai apasă o dată pentru următorul lot
         $q      = $this->queue();
         $filled = 0;
@@ -953,11 +953,18 @@ class HZ_Bulk {
     }
 
     /** Câte imagini vrea acest articol: override din lot, altfel setarea site-ului. */
+    /**
+     * v3.13.0: UN SINGUR cadru per articol — coverul. Nu mai completăm și altă
+     * imagine în corpul articolului, nici din setarea site-ului, nici din
+     * override-ul lotului trimis de panou. (Ca să revii: scoate MAX_IMAGES.)
+     */
+    const MAX_IMAGES = 1;
+
     private function images_for($item) {
         if (isset($item['img']) && $item['img'] !== null && $item['img'] !== '') {
-            return max(0, min(3, (int) $item['img']));
+            return max(0, min(self::MAX_IMAGES, (int) $item['img']));
         }
-        return max(0, min(3, (int) get_option('hzb_images', 2)));
+        return max(0, min(self::MAX_IMAGES, (int) get_option('hzb_images', 1)));
     }
 
     /**

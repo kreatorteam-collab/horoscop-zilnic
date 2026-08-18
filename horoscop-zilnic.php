@@ -3,7 +3,7 @@
  * Plugin Name: AI Writer & Conținut Zilnic
  * Plugin URI: https://targetseo.ro/
  * Description: Generează și rescrie articole SEO direct în editor (GPT-5.6 și Claude), creează articole în bulk cu imagini de stock relevante (Magnific) și publică automat conținut zilnic: horoscopul cu toate cele 12 zodii și vremea pe regiuni (date oficiale ANM). Un singur plugin: chei API, costuri, editor, bulk, horoscop și vreme.
- * Version: 3.12.0
+ * Version: 3.13.0
  * Author: Eduard / TargetSEO
  * Text Domain: horoscop-zilnic
  * Requires at least: 5.6
@@ -15,7 +15,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('HZ_VERSION', '3.12.0');
+define('HZ_VERSION', '3.13.0');
 define('HZ_PATH', plugin_dir_path(__FILE__));
 define('HZ_URL', plugin_dir_url(__FILE__));
 
@@ -215,6 +215,16 @@ add_action('init', function () {
         update_option('hzb_dl100_forced', 1, 'no');
     }
 
+    // v3.13.0: UN SINGUR cadru per articol (coverul). Site-urile rămase pe vechea
+    // valoare implicită (2 = cover + 1 în articol) coboară la 1; dacă userul a pus
+    // manual „Fără imagini", alegerea lui rămâne. O singură dată, cu flag propriu.
+    if (!get_option('hzb_img1_forced')) {
+        if ((int) get_option('hzb_images', 1) > 1) {
+            update_option('hzb_images', 1, 'no');
+        }
+        update_option('hzb_img1_forced', 1, 'no');
+    }
+
     update_option('hz_db_version', HZ_VERSION, 'no');
 });
 
@@ -249,7 +259,7 @@ add_action('init', function () {
 function hz_bulk_defaults() {
     return array(
         'hzb_magnific_key' => '',
-        'hzb_images'       => 2,
+        'hzb_images'       => 1,
         'hzb_image_size'   => 'large',
         'hzb_daily_limit'  => 100,
         'hzb_gap'          => 120,

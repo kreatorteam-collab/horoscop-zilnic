@@ -621,13 +621,12 @@ class HZ_Admin {
                     <tr>
                         <th scope="row"><label for="hzb_images"><?php esc_html_e('Imagini per articol', 'horoscop-zilnic'); ?></label></th>
                         <td>
-                            <?php $bi = (int) get_option('hzb_images', 2); ?>
+                            <?php $bi = (int) get_option('hzb_images', 1); ?>
                             <select name="hzb_images" id="hzb_images">
                                 <option value="0" <?php selected(0, $bi); ?>><?php esc_html_e('Fără imagini', 'horoscop-zilnic'); ?></option>
                                 <option value="1" <?php selected(1, $bi); ?>><?php esc_html_e('1 (doar cover)', 'horoscop-zilnic'); ?></option>
-                                <option value="2" <?php selected(2, $bi); ?>><?php esc_html_e('2 (cover + 1 în articol)', 'horoscop-zilnic'); ?></option>
-                                <option value="3" <?php selected(3, $bi); ?>><?php esc_html_e('3 (cover + 2 în articol)', 'horoscop-zilnic'); ?></option>
                             </select>
+                            <p class="description"><?php esc_html_e('Articolele primesc DOAR imaginea de cover — nu se mai completează și alte imagini în corpul articolului.', 'horoscop-zilnic'); ?></p>
                         </td>
                     </tr>
                     <tr>
