@@ -75,6 +75,50 @@ class HZ_Links {
     }
 
     /**
+     * Scoate CITĂRILE lăsate de căutarea web. Modelul (OpenAI Responses API) încheie
+     * frazele cu „([domeniu](https://…?utm_source=openai))" — o citare, nu un link
+     * editorial: textul ancorei e chiar domeniul. Articolul se salvează ca HTML, deci
+     * markdown-ul rămâne VIZIBIL în pagină, ca text stricat.
+     *
+     * Se scot indiferent de domeniu (inclusiv instituții oficiale): articolul trebuie
+     * SCRIS pe baza surselor, nu să le citeze. Un link editorial adevărat — cu text de
+     * ancoră normal, nu cu numele domeniului — trece mai departe prin strip_external.
+     */
+    public static function strip_citations($content) {
+        $content = (string) $content;
+        $host_rx = '(?:[a-z0-9](?:[a-z0-9\-]*[a-z0-9])?\.)+[a-z]{2,}';
+
+        // a) citarea completă, cu parantezele ei:  ([domeniu](url))  /  (vezi [domeniu](url))
+        $content = preg_replace(
+            '#\(\s*[^()\[\]]{0,20}\[\s*' . $host_rx . '\s*\]\(\s*https?://[^)\s]+\s*\)\s*\)#i',
+            '',
+            $content
+        );
+        // b) citarea fără paranteze exterioare:  [domeniu](url)
+        $content = preg_replace(
+            '#\[\s*' . $host_rx . '\s*\]\(\s*https?://[^)\s]+\s*\)#i',
+            '',
+            $content
+        );
+        // c) restul rămas după o curățare veche: paranteză cu DOAR un domeniu, ex. „(oecd.org)"
+        $content = preg_replace('#\(\s*' . $host_rx . '\s*\)#i', '', $content);
+
+        // Cicatricile: paranteze goale, spațiu înaintea punctuației, punct dublu.
+        $content = preg_replace('#\(\s*\)#', '', $content);
+        $content = preg_replace('#\s+([,.;:!?])#', '$1', $content);
+        $content = preg_replace('#([.!?])\1+#', '$1', $content);
+        $content = preg_replace('#[ \t]{2,}#', ' ', $content);
+        return $content;
+    }
+
+    /** URL fără parametrii de urmărire adăugați de căutarea web (utm_source=openai etc.). */
+    public static function clean_url($url) {
+        $url = preg_replace('#([?&])utm_[a-z_]+=[^&\#]*#i', '$1', (string) $url);
+        $url = preg_replace('#[?&]+(\#|$)#', '$1', $url);
+        return rtrim(str_replace('?&', '?', $url), '?&');
+    }
+
+    /**
      * Curăță referințele externe puse de MODEL (mai ales din căutarea web): scoate
      * linkurile lui + numele de site-uri .ro, CU EXCEPȚIA site-urilor oficiale ale
      * statului. Se rulează ÎNAINTE de apply() — linkurile CERUTE de user nu-s încă în
@@ -83,6 +127,9 @@ class HZ_Links {
      */
     public static function strip_external($content) {
         $content = (string) $content;
+
+        // 0) CITĂRILE căutării web. Se scot ÎNAINTE de orice, indiferent de domeniu.
+        $content = self::strip_citations($content);
 
         // 1) <a href>: păstrăm doar spre domenii oficiale ale statului; restul le
         //    „despachetăm" (rămâne textul ancorei, dispare linkul).
@@ -96,11 +143,16 @@ class HZ_Links {
         );
 
         // 2) Linkuri Markdown [text](url) rămase -> doar textul, dacă nu-s oficiale.
+        //    Pe cele oficiale NU le mai lăsăm în markdown: articolul se salvează ca HTML,
+        //    deci „[text](url)" rămânea vizibil ca atare în pagină. Le transformăm în
+        //    <a href> adevărat (asta era greșeala din v3.8.6).
         $content = preg_replace_callback(
             '#\[([^\]]+)\]\((https?://[^)\s]+)\)#i',
             function ($m) {
                 $host = strtolower((string) parse_url($m[2], PHP_URL_HOST));
-                return self::is_official_ro($host) ? $m[0] : $m[1];
+                if (!self::is_official_ro($host)) { return $m[1]; }
+                return '<a href="' . esc_url(self::clean_url($m[2])) . '" target="_blank" rel="nofollow noopener">'
+                    . $m[1] . '</a>';
             },
             $content
         );
@@ -126,6 +178,9 @@ class HZ_Links {
         );
 
         // Curățenie după scoateri: paranteze goale, spații/punctuație duble.
+        // „preluate de Ziarul Financiar și News.ro." -> pasul 4 scotea domeniul și rămânea
+        // „…Financiar și." Conjuncția rămasă în aer se duce odată cu el.
+        $content = preg_replace('#\s+\b(și|si|sau|ori)\b\s*(?=[,.;:!?])#iu', '', $content);
         $content = preg_replace('#\(\s*\)#', '', $content);
         $content = preg_replace('#[ \t]{2,}#', ' ', $content);
         $content = preg_replace('#\s+([,.;:!?])#', '$1', $content);
