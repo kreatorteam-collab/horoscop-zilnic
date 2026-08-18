@@ -94,6 +94,9 @@ class HZ_Remote {
             'ai_limit_hit'    => class_exists('CW_Usage') ? CW_Usage::limit_reached() : false,
             'ai_model'        => class_exists('CW_API') ? CW_API::resolve_model('') : '',
             'ai_model_set'    => (string) get_option('cw_default_model', ''),
+            // Modelele proprii ale conținutului zilnic (gol = folosesc modelul implicit).
+            'horoscope_model' => (string) get_option('hz_model', ''),
+            'weather_model'   => (string) get_option('hzw_model', ''),
             'ai_month_cost'   => class_exists('CW_Usage') ? round((float) CW_Usage::month_cost(), 4) : 0,
             'ai_month_limit'  => (float) get_option('cw_monthly_cost_limit', 0),
             'web_search'      => (int) get_option('cw_web_search', 0),
@@ -266,13 +269,22 @@ class HZ_Remote {
             $changed[] = $field;
         }
 
-        if (isset($set['model']) && trim((string) $set['model']) !== '') {
-            $model = sanitize_text_field((string) $set['model']);
+        // Modelul implicit al site-ului + modelele PROPRII ale conținutului zilnic.
+        // Horoscopul și vremea au opțiuni separate (gol = folosesc modelul implicit),
+        // deci pot rula pe ceva ieftin fără să atingem modelul editorial.
+        $models = array(
+            'model'           => 'cw_default_model',
+            'horoscope_model' => 'hz_model',
+            'weather_model'   => 'hzw_model',
+        );
+        foreach ($models as $field => $option) {
+            if (!isset($set[$field]) || trim((string) $set[$field]) === '') { continue; }
+            $model = sanitize_text_field((string) $set[$field]);
             if (CW_Models::exists($model)) {
-                update_option('cw_default_model', $model);
-                $changed[] = 'model';
+                update_option($option, $model, 'no');
+                $changed[] = $field;
             } else {
-                $skipped[] = 'model necunoscut: ' . $model;
+                $skipped[] = $field . ' necunoscut: ' . $model;
             }
         }
 
@@ -312,6 +324,8 @@ class HZ_Remote {
                 'ai_openai'      => CW_API::has_provider_key('openai'),
                 'ai_anthropic'   => CW_API::has_provider_key('anthropic'),
                 'ai_model_set'   => (string) get_option('cw_default_model', ''),
+                'horoscope_model'=> (string) get_option('hz_model', ''),
+                'weather_model'  => (string) get_option('hzw_model', ''),
                 'ai_model'       => CW_API::resolve_model(''),
                 'ai_month_limit' => (float) get_option('cw_monthly_cost_limit', 0),
                 'web_search'     => (int) get_option('cw_web_search', 0),
