@@ -207,6 +207,9 @@ class HZ_Bulk {
         $len    = isset($opts['length']) ? (int) $opts['length'] : 0;
         $img    = isset($opts['images']) && $opts['images'] !== '' ? max(0, min(self::MAX_IMAGES, (int) $opts['images'])) : null;
         $mkcat  = !empty($opts['create_category']);
+        // v3.16.0: 'review' = articol editorial cu produse (vezi HZ_Review). Orice
+        // altceva = articolul obișnuit, pe șablonul editorial al site-ului.
+        $mode   = (isset($opts['mode']) && $opts['mode'] === 'review') ? 'review' : '';
         $created = array();
         // Căutare web per lot: null = las setarea site-ului, 0/1 = o forțez.
         $web = (isset($opts['web']) && $opts['web'] !== '' && $opts['web'] !== null) ? (int) !!$opts['web'] : null;
@@ -239,6 +242,26 @@ class HZ_Bulk {
                 $links = HZ_Links::sanitize_list($row['links']);
             }
 
+            // Produsele articolului editorial devin ȘI linkuri (ancoră = numele
+            // produsului, rel=sponsored), ca să refolosim garanția de inserare din
+            // HZ_Links. Produsele intră PRIMELE: dacă lotul cere și linkuri editoriale,
+            // pe alea le tăiem noi la plafon, nu produsele plătite.
+            $prod = array();
+            if ($mode === 'review' && !empty($row['products']) && class_exists('HZ_Review')) {
+                $prod = HZ_Review::sanitize_products($row['products']);
+                if (count($prod) < HZ_Review::MIN_PRODUCTS) {
+                    $skipped++;
+                    unset($known[$key]); // titlul rămâne disponibil pentru o comandă corectă
+                    continue;
+                }
+                if (class_exists('HZ_Links')) {
+                    $links = HZ_Links::sanitize_list(
+                        array_merge(HZ_Review::to_links($prod), $links),
+                        HZ_Review::MAX_PRODUCTS + 2
+                    );
+                }
+            }
+
             $q[] = array(
                 't'       => $title,
                 's'       => 'pending',
@@ -256,6 +279,8 @@ class HZ_Bulk {
                 'note'    => '',
                 'cost'    => 0.0,
                 'links'   => $links,
+                'mode'    => $mode,
+                'prod'    => $prod,
                 'b'       => $batch,
                 'len'     => $len > 0 ? max(300, $len) : 0,
                 'img'     => $img,
@@ -729,6 +754,11 @@ class HZ_Bulk {
             if (isset($saved['lnk'])) { $item['lnk'] = $saved['lnk']; }
         } else {
             $links = (isset($item['links']) && is_array($item['links'])) ? $item['links'] : array();
+            // v3.16.0 — „editorial cu produse": prompt propriu (structura pe criterii de
+            // alegere), iar numele produselor sunt DEJA în el. Deci nu mai trece și prin
+            // prompt_hint, care ar cere a doua oară aceleași expresii.
+            $review = (isset($item['mode']) && $item['mode'] === 'review')
+                && class_exists('HZ_Review') && !empty($item['prod']);
 
             $brief = $title;
             if (trim((string) $item['extra']) !== '') {
@@ -736,7 +766,7 @@ class HZ_Bulk {
             }
             // Ancorele cerute din panoul central intră în brief: modelul le scrie în text,
             // iar linkul propriu-zis îl punem noi după generare (HZ_Links).
-            if (!empty($links) && class_exists('HZ_Links')) {
+            if (!$review && !empty($links) && class_exists('HZ_Links')) {
                 $brief .= HZ_Links::prompt_hint($links);
             }
             // Cu căutare web îi spunem ce zi e (altfel „acum" înseamnă data antrenamentului)
@@ -754,13 +784,22 @@ class HZ_Bulk {
             }
             $words = (isset($item['len']) && (int) $item['len'] > 0)
                 ? (int) $item['len']
-                : (int) get_option('hzb_length', 1000);
-            $tpl = get_option('cw_article_prompt', CW_Admin::default_article_prompt());
-            $prompt = str_replace(
-                array('{{continut}}', '{{cuvinte}}'),
-                array($brief, (string) max(300, $words)),
-                $tpl
-            );
+                : ($review ? HZ_Review::DEFAULT_WORDS : (int) get_option('hzb_length', 1000));
+            if ($review) {
+                // Prompt editorial propriu: criterii de alegere + recomandări argumentate.
+                // Instrucțiunile de lot ($item['extra']) și nota despre căutarea web sunt
+                // deja în $brief, dar $brief conține și titlul — îl scoatem, ca să nu ajungă
+                // de două ori în prompt.
+                $tail   = trim(substr($brief, strlen($title)));
+                $prompt = HZ_Review::prompt($title, $item['prod'], $words, $tail);
+            } else {
+                $tpl = get_option('cw_article_prompt', CW_Admin::default_article_prompt());
+                $prompt = str_replace(
+                    array('{{continut}}', '{{cuvinte}}'),
+                    array($brief, (string) max(300, $words)),
+                    $tpl
+                );
+            }
 
             // Căutare web doar pentru ARTICOL (nu și pentru micro-apelul de traducere a
             // interogării de imagini), și doar dacă lotul a cerut-o explicit.
@@ -809,6 +848,18 @@ class HZ_Bulk {
                     'forced' => (int) $applied['forced'],
                 );
                 $link_note = HZ_Links::note($applied);
+            }
+
+            // 1c) Articolele cu produse: nota de dezvăluire a afilierii (obligatorie —
+            // Google pentru conținut cu linkuri plătite, DSA/ANPC pentru comunicare
+            // comercială) + verificarea că a ieșit editorial, nu catalog. Avertismentul
+            // nu blochează publicarea (articolul e deja plătit), dar apare în panou.
+            if ($review) {
+                $content = HZ_Review::add_disclosure($content);
+                $warn    = HZ_Review::warnings($content, $item['prod']);
+                if ($warn !== '') {
+                    $link_note = trim($warn . ' · ' . $link_note, " \t·");
+                }
             }
         }
 

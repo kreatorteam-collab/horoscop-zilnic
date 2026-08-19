@@ -88,6 +88,10 @@ class HZ_Remote {
             'ok'              => true,
             'plugin_version'  => defined('HZ_VERSION') ? HZ_VERSION : '',
             'site_name'       => get_bloginfo('name'),
+            // Panoul Profitshare întreabă înainte de a trimite un lot „review": pe
+            // site-urile rămase pe o versiune veche modul lipsește, iar lotul ar fi
+            // scris ca articol obișnuit, fără structura pe criterii.
+            'review_mode'     => class_exists('HZ_Review'),
             'ai_key'          => class_exists('CW_API') && CW_API::has_key(),
             'ai_openai'       => class_exists('CW_API') && CW_API::has_provider_key('openai'),
             'ai_anthropic'    => class_exists('CW_API') && CW_API::has_provider_key('anthropic'),
@@ -160,6 +164,9 @@ class HZ_Remote {
                 'cat'      => isset($it['category_id']) ? (int) $it['category_id'] : 0,
                 'cat_name' => isset($it['category_name']) ? sanitize_text_field((string) $it['category_name']) : '',
                 'links'    => isset($it['links']) ? $it['links'] : array(),
+                // v3.16.0 — produsele articolului editorial (mode=review). Curățarea o
+                // face HZ_Review::sanitize_products, în add_items.
+                'products' => isset($it['products']) ? $it['products'] : array(),
             );
         }
 
@@ -187,6 +194,9 @@ class HZ_Remote {
             'random_date' => isset($data['random_date']) ? $data['random_date'] : '',
             // Categoria lipsă se creează DOAR dacă panoul cere explicit.
             'create_category' => !empty($data['create_category']),
+            // v3.16.0: 'review' = articol editorial cu produse (criterii de alegere +
+            // recomandări argumentate + linkuri sponsored). Gol = articolul obișnuit.
+            'mode'   => isset($data['mode']) ? sanitize_key((string) $data['mode']) : '',
         ));
 
         return array(
