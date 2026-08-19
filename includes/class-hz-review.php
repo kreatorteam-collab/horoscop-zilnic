@@ -296,13 +296,20 @@ class HZ_Review {
         if (empty($products) || empty($attachments)) { return $content; }
 
         $nr = 0;
+        // Cursor: fiecare produs se cauta DUPA cel precedent. Fara el, un produs pomenit
+        // in introducere sau in capitolul de criterii isi primea cardul acolo, iar
+        // paragraful care il argumenta ramanea mai jos, orfan.
+        // Pornim din capitolul de RECOMANDARI, nu de la inceputul articolului: modelul
+        // pomeneste adesea un produs mai devreme (in criterii), iar cardul ateriza
+        // acolo, cu paragraful lui adevarat ramas mai jos. Cursorul rezolva doar
+        // produsele urmatoare; primul are nevoie de punctul asta de pornire.
+        $cursor = self::recommendations_offset($content, $products);
+
         foreach ($products as $p) {
             $nr++;
             if (empty($attachments[$p['url']])) { continue; }
             $att = (int) $attachments[$p['url']];
 
-            // 'large' (1024), nu 'medium' (300): blocul afișează poza la 600px, iar o
-            // imagine de 300 întinsă la 600 iese vizibil neclară.
             $img = wp_get_attachment_image($att, 'large', false, array(
                 'class'   => 'hz-product-img',
                 'loading' => 'lazy',
@@ -310,26 +317,98 @@ class HZ_Review {
             ));
             if (!$img) { continue; }
 
-            // Numerotat și pe toată lățimea, nu flotant: pe ecran lat blocurile
-            // flotante derivau lângă paragraful GREȘIT, iar articolul arăta dezordonat.
-            // Numărul vine din ordinea produselor din lot, deci corespunde ordinii în
-            // care modelul le-a primit și le recomandă.
-            // Ordinea în HTML: antet (număr + nume), apoi imaginea. La 600px lățime,
-            // poza pe rândul ei se citește ca un element de listă, nu ca un banner.
-            $href  = esc_url($p['url']);
-            $block = '<div class="hz-product" id="produs-' . $nr . '">'
-                   . '<span class="hz-product-nr">' . $nr . '</span>'
-                   . '<span class="hz-product-name">'
-                   . '<a href="' . $href . '" rel="sponsored nofollow" target="_blank">'
-                   . esc_html($p['name']) . '</a></span>'
-                   // Poza NU e link (v3.16.5): un singur link per produs, pe nume.
-                   // Altfel același produs are două linkuri identice unul sub altul.
-                   . '<span class="hz-product-thumb">' . $img . '</span>'
-                   . '</div>';
-
-            $content = self::place_after_mention($content, $p, $block);
+            $r = self::wrap_paragraph($content, $p, $nr, $img, $cursor);
+            if ($r === null) { continue; }
+            $content = $r['content'];
+            $cursor  = $r['cursor'];
         }
         return $content;
+    }
+
+    /**
+     * Impacheteaza paragraful care recomanda produsul intr-un card: poza intr-o parte,
+     * textul in cealalta.
+     *
+     * De ce inghitim paragraful in loc sa punem blocul dupa el: altfel poza si numele
+     * stau intr-o caseta, iar argumentul intr-un paragraf separat dedesubt - arata
+     * dezlipite, ca doua lucruri fara legatura. Impreuna se citesc ca o recomandare.
+     *
+     * @return array|null array('content','cursor') sau null daca nu gasim paragraful
+     */
+    /**
+     * Unde incepe capitolul de recomandari: sectiunea <h2> in care apar CELE MAI MULTE
+     * nume de produse.
+     *
+     * Nu cautam titlul dupa cuvinte („Recomandari") - modelul il formuleaza cum vrea,
+     * iar pe alta nisa poate fi „Ce merita banii". Numaratoarea de produse e semnalul
+     * sigur: capitolul de recomandari e, prin constructie, singurul care le contine pe
+     * toate.
+     *
+     * @return int offset in continut (0 = nu s-a putut determina, cautam de la inceput)
+     */
+    private static function recommendations_offset($content, $products) {
+        if (!preg_match_all('#<h2\b[^>]*>#i', $content, $m, PREG_OFFSET_CAPTURE)) {
+            return 0;
+        }
+
+        $starts = array();
+        foreach ($m[0] as $hit) { $starts[] = (int) $hit[1]; }
+        $starts[] = strlen($content); // sfarsitul ultimei sectiuni
+
+        $best = 0;
+        $bestCount = 0;
+        for ($i = 0; $i < count($starts) - 1; $i++) {
+            $section = self::fold_text(substr($content, $starts[$i], $starts[$i + 1] - $starts[$i]));
+            $count = 0;
+            foreach ($products as $p) {
+                $needle = self::fold_text($p['name']);
+                if ($needle !== '' && strpos($section, $needle) !== false) { $count++; }
+            }
+            if ($count > $bestCount) {
+                $bestCount = $count;
+                $best = $starts[$i];
+            }
+        }
+
+        // Sub doua produse intr-o sectiune nu putem vorbi de „capitolul de recomandari".
+        return $bestCount >= 2 ? $best : 0;
+    }
+
+    private static function wrap_paragraph($content, $p, $nr, $img, $cursor) {
+        $needle = self::fold_text($p['name']);
+        if ($needle === '') { return null; }
+
+        $pos = strpos(self::fold_text($content), $needle, $cursor);
+        if ($pos === false) { return null; }
+
+        // Paragraful care il contine: ultima deschidere <p> dinaintea numelui.
+        if (!preg_match_all('#<p[^>]*>#i', substr($content, 0, $pos), $m, PREG_OFFSET_CAPTURE)) {
+            return null;
+        }
+        $open       = end($m[0]);
+        $start      = (int) $open[1];
+        $inner_from = $start + strlen($open[0]);
+
+        $end = stripos($content, '</p>', $pos);
+        if ($end === false) { return null; }
+
+        $inner = substr($content, $inner_from, $end - $inner_from);
+        $href  = esc_url($p['url']);
+
+        $card = '<div class="hz-product" id="produs-' . $nr . '">'
+              . '<div class="hz-product-media">' . $img . '</div>'
+              . '<div class="hz-product-body">'
+              . '<p class="hz-product-title">'
+              . '<span class="hz-product-nr">' . $nr . '</span>'
+              // Poza NU e link: un singur link per produs, pe nume.
+              . '<a href="' . $href . '" rel="sponsored nofollow" target="_blank">'
+              . esc_html($p['name']) . '</a>'
+              . '</p>'
+              . '<p class="hz-product-text">' . $inner . '</p>'
+              . '</div></div>';
+
+        $new = substr($content, 0, $start) . $card . substr($content, $end + 4);
+        return array('content' => $new, 'cursor' => $start + strlen($card));
     }
 
     /**

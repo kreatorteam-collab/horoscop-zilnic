@@ -1,77 +1,101 @@
 /**
- * Blocul de produs din articolele „editorial cu produse".
+ * Cardul de produs din articolele „editorial cu produse".
  *
- * v3.16.3: poză mare (600px), pe rândul ei. La dimensiunea asta rândul compact
- * (număr + miniatură + nume, unul lângă altul) nu mai funcționează, deci blocul
- * devine: antet cu numărul și numele, apoi imaginea dedesubt.
+ * v3.16.6: poza intr-o parte, textul in cealalta. Cardul INGHITE paragraful in care
+ * modelul recomanda produsul - inainte, poza si numele stateau intr-o caseta, iar
+ * argumentul intr-un paragraf separat dedesubt, si aratau dezlipite.
  *
- * Rămâne totuși listă numerotată, nu grilă de catalog: un singur produs pe rând,
- * plasat sub paragraful care îl argumentează.
+ * Ramane conservator ca aspect: fara chenar gros, fara buton de cumparare, fara pret.
+ * Produsul e ilustratia unui sfat, nu o casuta de magazin.
  */
 .hz-product {
-    display: block;
-    max-width: 600px;
-    margin: 1.25rem 0 1.75rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 1.1rem;
+    margin: 1.4rem 0;
+    padding: 1rem;
+    border: 1px solid rgba(128, 128, 128, .2);
+    border-radius: 10px;
 }
 
-/* Antetul: numărul din listă + numele produsului, pe același rând. */
-.hz-product-head,
-.hz-product > .hz-product-nr {
-    vertical-align: middle;
+/* Coloana cu poza. Latime fixa, ca toate cardurile sa fie aliniate intre ele,
+   indiferent de proportiile pozei. */
+.hz-product-media {
+    flex: 0 0 auto;
+    width: 180px;
+    line-height: 0;
+}
+
+.hz-product-media img,
+.hz-product .hz-product-img {
+    /* `width: auto`, NU 100%: API-ul da uneori doar miniatura (masurat 140x140), iar
+       intinderea o face vizibil neclara. Mai bine mai mica si clara. */
+    width: auto;
+    height: auto;
+    max-width: 100%;
+    border-radius: 8px;
+    display: block;
+}
+
+.hz-product-body {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* Titlul: numarul din lista + numele produsului (singurul link din card). */
+.hz-product-title {
+    margin: 0 0 .5rem;
+    line-height: 1.35;
 }
 
 .hz-product-nr {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 1.9rem;
-    height: 1.9rem;
-    margin-right: .6rem;
+    width: 1.75rem;
+    height: 1.75rem;
+    margin-right: .55rem;
     border-radius: 50%;
     background: rgba(128, 128, 128, .16);
     font-weight: 700;
-    font-size: .95rem;
+    font-size: .9rem;
     line-height: 1;
     vertical-align: middle;
 }
 
-.hz-product-name {
-    display: inline;
+.hz-product-title a {
+    font-weight: 700;
+    text-decoration: none;
     vertical-align: middle;
 }
 
-.hz-product-name a {
-    font-weight: 600;
-    text-decoration: none;
-    font-size: 1.05em;
-}
-
-.hz-product-name a:hover {
+.hz-product-title a:hover {
     text-decoration: underline;
 }
 
-/* Imaginea: pe rândul ei, sub antet. `height: auto` — produsele au proporții
-   diferite, iar o înălțime fixă le-ar deforma sau le-ar tăia. */
-.hz-product-thumb {
-    display: block;
-    margin-top: .6rem;
-    line-height: 0;
+.hz-product-text {
+    margin: 0;
 }
 
-.hz-product-thumb img,
-.hz-product .hz-product-img {
-    /* `width: auto`, NU 100%: daca fisierul e mai mic de 600px (API-ul da uneori
-       doar miniatura), intinderea il face vizibil neclar. Mai bine se afiseaza mai
-       mic si CLAR decat mare si spalacit. */
-    width: auto;
-    height: auto;
-    max-width: 600px;
-    max-width: min(600px, 100%);
-    border-radius: 8px;
-    display: block;
+/* Pe telefon poza trece deasupra textului: 180px langa un paragraf ingust ar lasa
+   textul pe 2-3 cuvinte pe rand. */
+@media (max-width: 560px) {
+    .hz-product {
+        flex-direction: column;
+        gap: .75rem;
+    }
+
+    .hz-product-media {
+        width: 100%;
+        text-align: center;
+    }
+
+    .hz-product-media img {
+        margin: 0 auto;
+    }
 }
 
-/* Nota de dezvăluire a afilierii (oprită implicit din v3.16.1, dar stilul rămâne
+/* Nota de dezvaluire a afilierii (oprita implicit din v3.16.1, dar stilul ramane
    pentru site-urile care o pornesc). */
 .hz-affiliate-note {
     font-size: .9em;
