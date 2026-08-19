@@ -28,7 +28,7 @@ class HZ_Remote {
     }
 
     public function register() {
-        $routes = array('info', 'enqueue', 'status', 'control', 'settings', 'rewrite', 'golinks');
+        $routes = array('info', 'enqueue', 'status', 'control', 'settings', 'rewrite', 'golinks', 'trash');
         foreach ($routes as $route) {
             register_rest_route('hz/v1', '/' . $route, array(
                 'methods'             => 'POST',
@@ -381,6 +381,58 @@ class HZ_Remote {
             $out['hits'] = HZ_GoLinks::hits(isset($data['days']) ? (int) $data['days'] : 30);
         }
         return $out;
+    }
+
+    /**
+     * Mută la COȘ articolele cu titlurile date. Body: { titles: [...], hard: 0|1 }
+     *
+     * Deliberat la Coș, nu ștergere definitivă: e o acțiune pe conținut publicat de
+     * pe un panou aflat în altă parte, iar recuperarea trebuie să fie posibilă dacă
+     * s-a greșit lotul. În plus, bariera anti-dubluri NU se uită în Coș, deci titlul
+     * se eliberează oricum pentru regenerare — ștergerea definitivă n-ar aduce nimic
+     * în plus, doar risc.
+     *
+     * `hard: 1` șterge definitiv, dar numai dacă panoul o cere explicit.
+     */
+    public function handle_trash(WP_REST_Request $req) {
+        $data = $this->auth($req);
+        if ($data instanceof WP_REST_Response) { return $data; }
+
+        $titles = isset($data['titles']) && is_array($data['titles']) ? $data['titles'] : array();
+        if (empty($titles)) {
+            return new WP_REST_Response(array('error' => 'no_titles'), 400);
+        }
+        $hard = !empty($data['hard']);
+        $done = array();
+        $missing = 0;
+
+        foreach (array_slice($titles, 0, 200) as $t) {
+            $title = wp_strip_all_tags((string) $t);
+            if (trim($title) === '') { continue; }
+
+            $ids = get_posts(array(
+                'post_type'      => 'post',
+                // Coșul e exclus: un articol deja acolo nu mai are ce fi „șters".
+                'post_status'    => array('publish', 'draft', 'pending', 'future', 'private'),
+                'title'          => $title,
+                'posts_per_page' => 5,
+                'fields'         => 'ids',
+                'no_found_rows'  => true,
+            ));
+            if (empty($ids)) { $missing++; continue; }
+
+            foreach ($ids as $id) {
+                $ok = $hard ? wp_delete_post($id, true) : wp_trash_post($id);
+                if ($ok) { $done[] = (int) $id; }
+            }
+        }
+
+        return array(
+            'ok'      => true,
+            'trashed' => count($done),
+            'missing' => $missing,
+            'hard'    => $hard ? 1 : 0,
+        );
     }
 
     /** start | stop | retry | clear */
