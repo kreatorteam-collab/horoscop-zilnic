@@ -411,23 +411,34 @@ class HZ_Remote {
         // majuscule sau ghilimele schimbate de wptexturize. Cu egalitate strictă,
         // ștergerea „reușea" raportând zero, ceea ce arată exact ca și cum n-ar merge.
         global $wpdb;
+        // Luăm ȘI articolele din coș, separat: „nu există" și „e deja în coș" sunt
+        // două răspunsuri complet diferite, iar raportate la fel („negăsite") trimit
+        // căutarea problemei în direcția greșită.
         $rows = $wpdb->get_results(
-            "SELECT ID, post_title FROM {$wpdb->posts}
+            "SELECT ID, post_title, post_status FROM {$wpdb->posts}
              WHERE post_type = 'post'
-               AND post_status IN ('publish','draft','pending','future','private')
-             ORDER BY ID DESC LIMIT 2000"
+               AND post_status IN ('publish','draft','pending','future','private','trash')
+             ORDER BY ID DESC LIMIT 3000"
         );
 
         $index = array();
+        $trash = array();
         foreach ($rows as $row) {
-            $index[self::norm_title($row->post_title)][] = (int) $row->ID;
+            $key = self::norm_title($row->post_title);
+            if ($row->post_status === 'trash') {
+                $trash[$key] = true;
+            } else {
+                $index[$key][] = (int) $row->ID;
+            }
         }
 
+        $already = 0;
         foreach (array_slice($titles, 0, 200) as $t) {
             $key = self::norm_title(wp_strip_all_tags((string) $t));
             if ($key === '') { continue; }
             if (empty($index[$key])) {
-                $not_found[] = mb_substr((string) $t, 0, 60);
+                if (!empty($trash[$key])) { $already++; }
+                else { $not_found[] = mb_substr((string) $t, 0, 60); }
                 continue;
             }
             foreach ($index[$key] as $id) {
@@ -439,9 +450,11 @@ class HZ_Remote {
         return array(
             'ok'        => true,
             'trashed'   => count($done),
+            // Erau deja în coș: nu e o eroare, e treaba deja făcută.
+            'already'   => $already,
             'missing'   => count($not_found),
-            // Titlurile negăsite, ca panoul să poată spune CARE - altfel „0 șterse"
-            // e un mesaj din care nu poți afla nimic.
+            // Titlurile chiar negăsite, ca panoul să poată spune CARE - altfel
+            // „0 șterse" e un mesaj din care nu poți afla nimic.
             'not_found' => array_slice($not_found, 0, 5),
             'hard'      => $hard ? 1 : 0,
         );
