@@ -42,20 +42,15 @@
     min-width: 0;
 }
 
-/* Titlul: numele produsului, singurul link din card. */
+/* Titlul: numele produsului, text simplu (singurul link din card e butonul). */
 .hz-product-title {
     margin: 0 0 .5rem;
     line-height: 1.35;
 }
 
-.hz-product-title a {
+.hz-product-title strong {
     font-weight: 700;
-    text-decoration: none;
-    vertical-align: middle;
-}
-
-.hz-product-title a:hover {
-    text-decoration: underline;
+    font-size: 1.05em;
 }
 
 .hz-product-text {
@@ -101,7 +96,7 @@
     margin: .85rem 0 0;
 }
 
-.hz-product-btn {
+.hz-product .hz-product-cta a.hz-product-btn {
     --hz-btn-bg: #1a73e8;
     --hz-btn-fg: #fff;
 
@@ -111,30 +106,34 @@
     padding: .7rem 1.4rem;
     border: 0;
     border-radius: 8px;
+    /* !important pe exact cele doua proprietati pe care tema le suprascria: pe
+       articol, regula ei pentru <a> castiga si butonul iesea cu text portocaliu
+       subliniat, ca un link obisnuit pe fundal albastru. */
     background: var(--hz-btn-bg);
-    color: var(--hz-btn-fg);
+    color: var(--hz-btn-fg) !important;
     font-weight: 600;
     font-size: 1em;
     line-height: 1.2;
-    text-decoration: none;
+    text-decoration: none !important;
+    box-shadow: none;
     transition: filter .15s ease, transform .15s ease;
 }
 
-.hz-product-btn::after {
+.hz-product .hz-product-cta a.hz-product-btn::after {
     content: "→";      /* sageata: spune ca pleci catre magazin */
     font-size: 1.05em;
     line-height: 1;
 }
 
-.hz-product-btn:hover,
-.hz-product-btn:focus {
-    color: var(--hz-btn-fg);
-    text-decoration: none;
+.hz-product .hz-product-cta a.hz-product-btn:hover,
+.hz-product .hz-product-cta a.hz-product-btn:focus {
+    color: var(--hz-btn-fg) !important;
+    text-decoration: none !important;
     filter: brightness(1.08);
     transform: translateY(-1px);
 }
 
-.hz-product-btn:active {
+.hz-product .hz-product-cta a.hz-product-btn:active {
     transform: translateY(0);
 }
 
