@@ -227,8 +227,20 @@ class HZ_Review {
         foreach ($products as $p) {
             if (empty($p['image'])) { continue; }
 
-            $tmp = download_url($p['image'], 60);
-            if (is_wp_error($tmp)) { continue; } // o poză lipsă nu strică articolul
+            // API-ul dă de multe ori MINIATURA, nu poza produsului (măsurat: 140x140
+            // de la Evrik). O miniatură întinsă la 600px e neapărat neclară, iar asta
+            // nu se poate repara din CSS. Încercăm întâi originalul, ghicit prin
+            // scoaterea sufixului de dimensiune din numele fișierului.
+            $tmp = null;
+            foreach (self::image_candidates($p['image']) as $candidate) {
+                $try = download_url($candidate, 60);
+                if (is_wp_error($try)) { continue; }
+                $size = @getimagesize($try);
+                // Sub 300px nu merită schimbul: păstrăm ce am luat și încercăm mai departe.
+                if ($size && (int) $size[0] >= 300) { $tmp = $try; break; }
+                if ($tmp === null) { $tmp = $try; } else { @unlink($try); }
+            }
+            if (!$tmp) { continue; } // o poză lipsă nu strică articolul
 
             $name = sanitize_file_name(sanitize_title($p['name']));
             if ($name === '') { $name = 'produs'; }
@@ -247,6 +259,28 @@ class HZ_Review {
             $out[$p['url']] = (int) $att;
         }
         return $out;
+    }
+
+    /**
+     * Variantele de URL de încercat pentru poza unui produs, de la cea mai mare la
+     * cea dată de API.
+     *
+     * Magazinele pe WordPress (majoritatea celor din rețea) redimensionează pozele cu
+     * sufix în nume: `poza-140x140.jpg`. Fișierul original stă la `poza.jpg`, în
+     * același loc. Scoțând sufixul avem o șansă bună la imaginea mare, iar dacă nu
+     * există pur și simplu pică descărcarea și rămânem cu miniatura.
+     *
+     * @return array URL-uri unice, în ordinea încercării
+     */
+    public static function image_candidates($url) {
+        $url  = (string) $url;
+        $out  = array();
+
+        $orig = preg_replace('#-\d{2,4}x\d{2,4}(\.[a-z0-9]{3,4})(\?.*)?$#i', '$1$2', $url);
+        if ($orig !== $url && $orig !== '') { $out[] = $orig; }
+
+        $out[] = $url;
+        return array_values(array_unique($out));
     }
 
     /**

@@ -60,9 +60,13 @@
 
 .hz-product-thumb img,
 .hz-product .hz-product-img {
-    width: 100%;
-    max-width: 600px;
+    /* `width: auto`, NU 100%: daca fisierul e mai mic de 600px (API-ul da uneori
+       doar miniatura), intinderea il face vizibil neclar. Mai bine se afiseaza mai
+       mic si CLAR decat mare si spalacit. */
+    width: auto;
     height: auto;
+    max-width: 600px;
+    max-width: min(600px, 100%);
     border-radius: 8px;
     display: block;
 }
