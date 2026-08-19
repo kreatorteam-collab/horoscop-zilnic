@@ -28,7 +28,7 @@ class HZ_Remote {
     }
 
     public function register() {
-        $routes = array('info', 'enqueue', 'status', 'control', 'settings', 'rewrite');
+        $routes = array('info', 'enqueue', 'status', 'control', 'settings', 'rewrite', 'golinks');
         foreach ($routes as $route) {
             register_rest_route('hz/v1', '/' . $route, array(
                 'methods'             => 'POST',
@@ -92,6 +92,9 @@ class HZ_Remote {
             // site-urile rămase pe o versiune veche modul lipsește, iar lotul ar fi
             // scris ca articol obișnuit, fără structura pe criterii.
             'review_mode'     => class_exists('HZ_Review'),
+            // Câte linkuri de afiliere are site-ul în redirector (0 = niciunul, deci
+            // articolele cu produse ar duce în gol).
+            'go_links'        => class_exists('HZ_GoLinks') ? count(HZ_GoLinks::map()) : 0,
             'ai_key'          => class_exists('CW_API') && CW_API::has_key(),
             'ai_openai'       => class_exists('CW_API') && CW_API::has_provider_key('openai'),
             'ai_anthropic'    => class_exists('CW_API') && CW_API::has_provider_key('anthropic'),
@@ -352,6 +355,32 @@ class HZ_Remote {
                 'magnific_limit' => HZ_Magnific::daily_limit(),
             ),
         );
+    }
+
+    /**
+     * Maparea redirectorului de afiliere: { map: { slug: url }, stats: 0|1 }
+     *
+     * Înlocuiește TOATĂ maparea (vezi HZ_GoLinks::set_map). Fără `map` întoarce doar
+     * starea — util ca panoul să vadă ce e pe site fără să scrie nimic.
+     */
+    public function handle_golinks(WP_REST_Request $req) {
+        $data = $this->auth($req);
+        if ($data instanceof WP_REST_Response) { return $data; }
+        if (!class_exists('HZ_GoLinks')) {
+            return new WP_REST_Response(array('error' => 'no_module'), 400);
+        }
+
+        $out = array('ok' => true);
+        if (isset($data['map']) && is_array($data['map'])) {
+            $res = HZ_GoLinks::set_map($data['map']);
+            $out['saved']   = (int) $res['count'];
+            $out['skipped'] = (int) $res['skipped'];
+        }
+        $out['links'] = count(HZ_GoLinks::map());
+        if (!empty($data['stats'])) {
+            $out['hits'] = HZ_GoLinks::hits(isset($data['days']) ? (int) $data['days'] : 30);
+        }
+        return $out;
     }
 
     /** start | stop | retry | clear */

@@ -31,6 +31,7 @@ require_once HZ_PATH . 'includes/class-hz-weather.php';
 require_once HZ_PATH . 'includes/class-hz-magnific.php';
 require_once HZ_PATH . 'includes/class-hz-links.php';
 require_once HZ_PATH . 'includes/class-hz-review.php';
+require_once HZ_PATH . 'includes/class-hz-golinks.php';
 require_once HZ_PATH . 'includes/class-hz-bulk.php';
 require_once HZ_PATH . 'includes/class-hz-rewrite.php';
 require_once HZ_PATH . 'includes/class-hz-remote.php';
@@ -43,6 +44,7 @@ function hz_init() {
     (new HZ_Weather())->init();
     (new HZ_Bulk())->init();
     (new HZ_Remote())->init();   // v3.5.0: comenzi din panoul central (HMAC)
+    (new HZ_GoLinks())->init(); // v3.16.0: redirector /go/{slug} pentru linkuri de afiliere
     (new HZ_Updater())->init();
 }
 add_action('plugins_loaded', 'hz_init');
