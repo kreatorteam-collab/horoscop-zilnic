@@ -267,7 +267,9 @@ class HZ_Review {
             if (empty($attachments[$p['url']])) { continue; }
             $att = (int) $attachments[$p['url']];
 
-            $img = wp_get_attachment_image($att, 'medium', false, array(
+            // 'large' (1024), nu 'medium' (300): blocul afișează poza la 600px, iar o
+            // imagine de 300 întinsă la 600 iese vizibil neclară.
+            $img = wp_get_attachment_image($att, 'large', false, array(
                 'class'   => 'hz-product-img',
                 'loading' => 'lazy',
                 'alt'     => esc_attr($p['name']),
@@ -278,14 +280,16 @@ class HZ_Review {
             // flotante derivau lângă paragraful GREȘIT, iar articolul arăta dezordonat.
             // Numărul vine din ordinea produselor din lot, deci corespunde ordinii în
             // care modelul le-a primit și le recomandă.
+            // Ordinea în HTML: antet (număr + nume), apoi imaginea. La 600px lățime,
+            // poza pe rândul ei se citește ca un element de listă, nu ca un banner.
             $href  = esc_url($p['url']);
             $block = '<div class="hz-product" id="produs-' . $nr . '">'
                    . '<span class="hz-product-nr">' . $nr . '</span>'
-                   . '<a class="hz-product-thumb" href="' . $href . '" rel="sponsored nofollow" target="_blank">'
-                   . $img . '</a>'
                    . '<span class="hz-product-name">'
                    . '<a href="' . $href . '" rel="sponsored nofollow" target="_blank">'
                    . esc_html($p['name']) . '</a></span>'
+                   . '<a class="hz-product-thumb" href="' . $href . '" rel="sponsored nofollow" target="_blank">'
+                   . $img . '</a>'
                    . '</div>';
 
             $content = self::place_after_mention($content, $p, $block);
