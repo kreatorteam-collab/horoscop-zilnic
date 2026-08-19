@@ -74,9 +74,17 @@ class HZ_Review {
             if (isset($seen[$key])) { continue; } // același produs de două ori
             $seen[$key] = 1;
 
+            $img = esc_url_raw(trim((string) (isset($p['image']) ? $p['image'] : '')));
+            if ($img !== '' && !preg_match('#^https?://#i', $img)) { $img = ''; }
+
             $out[] = array(
                 'name' => $name,
                 'url'  => $url,
+                // Poza produsului, de pe CDN-ul magazinului (vine prin API-ul oficial).
+                // Se descarcă în biblioteca site-ului la generare — nu o luăm prin hotlink:
+                // linkul lor se poate schimba oricând, iar atunci articolul rămâne cu o
+                // imagine ruptă pe care n-o vede nimeni până se plânge un cititor.
+                'image' => $img,
                 // 220, nu 160: nota e titlul complet din catalog, iar acolo stau
                 // atributele reale („160x200, Memory Foam, 7 zone de confort"). Tăiat
                 // prea scurt, rămâne doar brandul și modelul n-are pe ce se sprijini.
@@ -186,6 +194,100 @@ class HZ_Review {
 
         $note = '<p class="hz-affiliate-note"><em>' . esc_html(self::disclosure()) . '</em></p>' . "\n";
         return $note . $content;
+    }
+
+    /**
+     * Descarcă pozele produselor în biblioteca site-ului și le atașează articolului.
+     *
+     * NU hotlinkăm: URL-ul de pe CDN-ul magazinului se schimbă sau expiră, iar atunci
+     * rămâi cu imagini rupte în articole vechi, fără să afle nimeni. Descărcate, sunt
+     * servite de pe domeniul propriu și trec prin redimensionarea WordPress.
+     *
+     * @return array url produs => id atașament
+     */
+    public static function sideload_images($products, $post_id) {
+        $out = array();
+        if (empty($products)) { return $out; }
+
+        require_once ABSPATH . 'wp-admin/includes/media.php';
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+        require_once ABSPATH . 'wp-admin/includes/image.php';
+
+        foreach ($products as $p) {
+            if (empty($p['image'])) { continue; }
+
+            $tmp = download_url($p['image'], 60);
+            if (is_wp_error($tmp)) { continue; } // o poză lipsă nu strică articolul
+
+            $name = sanitize_file_name(sanitize_title($p['name']));
+            if ($name === '') { $name = 'produs'; }
+            $ext = strtolower((string) pathinfo((string) parse_url($p['image'], PHP_URL_PATH), PATHINFO_EXTENSION));
+            if (!preg_match('/^(jpe?g|png|webp|gif|avif)$/', $ext)) { $ext = 'jpg'; }
+
+            $att = media_handle_sideload(
+                array('name' => $name . '.' . $ext, 'tmp_name' => $tmp),
+                $post_id,
+                $p['name']
+            );
+            if (is_wp_error($att)) { @unlink($tmp); continue; }
+
+            update_post_meta($att, '_wp_attachment_image_alt', sanitize_text_field($p['name']));
+            update_post_meta($att, '_hz_review_product', 1);
+            $out[$p['url']] = (int) $att;
+        }
+        return $out;
+    }
+
+    /**
+     * Pune blocul fiecărui produs (poză + nume, ambele link) IMEDIAT DUPĂ paragraful
+     * în care produsul e recomandat.
+     *
+     * Asta e diferența dintre un editorial și un catalog: pozele nu stau una sub alta
+     * într-o grilă la finalul articolului, ci ilustrează fiecare argument acolo unde e
+     * făcut. Dacă produsul nu apare în text (n-ar trebui — HZ_Links garantează), blocul
+     * lui pur și simplu nu se pune, ca să nu ajungă un raft de poze la coadă.
+     */
+    public static function insert_product_blocks($content, $products, $attachments) {
+        if (empty($products) || empty($attachments)) { return $content; }
+
+        foreach ($products as $p) {
+            if (empty($attachments[$p['url']])) { continue; }
+            $att = (int) $attachments[$p['url']];
+
+            $img = wp_get_attachment_image($att, 'medium', false, array(
+                'class'   => 'hz-product-img',
+                'loading' => 'lazy',
+                'alt'     => esc_attr($p['name']),
+            ));
+            if (!$img) { continue; }
+
+            $href  = esc_url($p['url']);
+            $block = '<figure class="hz-product">'
+                   . '<a href="' . $href . '" rel="sponsored nofollow" target="_blank">' . $img . '</a>'
+                   . '<figcaption><a href="' . $href . '" rel="sponsored nofollow" target="_blank">'
+                   . esc_html($p['name']) . '</a></figcaption>'
+                   . '</figure>';
+
+            $content = self::place_after_mention($content, $p, $block);
+        }
+        return $content;
+    }
+
+    /**
+     * Inserează blocul după paragraful care conține linkul produsului. Fără paragraf
+     * potrivit, nu inserăm nimic — un bloc rătăcit la finalul articolului arată exact
+     * ca raftul de catalog pe care îl evităm.
+     */
+    private static function place_after_mention($content, $p, $block) {
+        $needle = 'href="' . $p['url'] . '"';
+        $pos = stripos($content, $needle);
+        if ($pos === false) { return $content; }
+
+        $end = stripos($content, '</p>', $pos);
+        if ($end === false) { return $content; }
+        $end += 4;
+
+        return substr($content, 0, $end) . "\n" . $block . substr($content, $end);
     }
 
     /**

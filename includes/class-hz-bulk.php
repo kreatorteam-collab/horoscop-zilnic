@@ -940,6 +940,25 @@ class HZ_Bulk {
         }
         update_post_meta($post_id, '_hzb_bulk', current_time('Y-m-d'));
 
+        // Pozele produselor: se pot atașa abia acum, după ce articolul are un ID.
+        // Blocurile intră după paragraful în care e recomandat fiecare produs, nu
+        // într-o grilă la final (vezi HZ_Review::insert_product_blocks).
+        if (!empty($item['mode']) && $item['mode'] === 'review'
+            && !empty($item['prod']) && class_exists('HZ_Review')) {
+            $prod_atts = HZ_Review::sideload_images($item['prod'], $post_id);
+            if (!empty($prod_atts)) {
+                $with_blocks = HZ_Review::insert_product_blocks($content, $item['prod'], $prod_atts);
+                if ($with_blocks !== $content) {
+                    wp_update_post(array('ID' => $post_id, 'post_content' => wp_slash($with_blocks)));
+                    $content = $with_blocks;
+                    // Marcaj pentru stilul blocurilor: CSS-ul se încarcă doar pe
+                    // articolele care chiar au produse.
+                    update_post_meta($post_id, '_hz_review', 1);
+                }
+            }
+            $prod_note = count($prod_atts) . '/' . count($item['prod']) . ' poze produs';
+        }
+
         if (!empty($att_ids)) {
             set_post_thumbnail($post_id, $att_ids[0]);
             foreach ($att_ids as $att) {
@@ -955,6 +974,9 @@ class HZ_Bulk {
             $item['note'] = 'Fără imagine' . ($img_note !== '' ? ': ' . $img_note : '');
         } else {
             $item['note'] = count($att_ids) . ' imagini' . ($img_note !== '' ? ' (' . $img_note . ')' : '');
+        }
+        if (!empty($prod_note)) {
+            $item['note'] = $prod_note . ' · ' . $item['note'];
         }
         if ($link_note !== '') {
             $item['note'] = $link_note . ' · ' . $item['note'];

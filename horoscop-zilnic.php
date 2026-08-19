@@ -61,8 +61,15 @@ add_action('plugins_loaded', 'hz_init');
 add_action('wp_enqueue_scripts', function () {
     if (!is_singular('post')) { return; }
     $id = get_queried_object_id();
-    if (!$id || !get_post_meta($id, '_hzr_done', true)) { return; }
-    wp_enqueue_style('hz-refresh', HZ_URL . 'assets/css/refresh.css', array(), HZ_VERSION);
+    if (!$id) { return; }
+    if (get_post_meta($id, '_hzr_done', true)) {
+        wp_enqueue_style('hz-refresh', HZ_URL . 'assets/css/refresh.css', array(), HZ_VERSION);
+    }
+    // v3.16.0: blocurile de produs din articolele „editorial cu produse". Stilul se
+    // incarca doar pe articolele care chiar au asa ceva.
+    if (get_post_meta($id, '_hz_review', true)) {
+        wp_enqueue_style('hz-review', HZ_URL . 'assets/css/review.css', array(), HZ_VERSION);
+    }
 });
 
 /**
