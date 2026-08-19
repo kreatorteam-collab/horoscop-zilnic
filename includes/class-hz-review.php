@@ -27,9 +27,10 @@ if (!defined('ABSPATH')) { exit; }
  */
 class HZ_Review {
 
-    /** Câte produse acceptăm per articol. Sub 3 nu e comparație, peste 8 devine listă. */
+    /** Câte produse acceptăm per articol. Sub 3 nu e comparație; peste 10 nu mai e
+     *  editorial, ci catalog — iar fiecare produs primește oricum un paragraf propriu. */
     const MIN_PRODUCTS = 3;
-    const MAX_PRODUCTS = 8;
+    const MAX_PRODUCTS = 10;
 
     /** Lungimea implicită (cuvinte) — un editorial cu criterii are nevoie de spațiu. */
     const DEFAULT_WORDS = 1400;
