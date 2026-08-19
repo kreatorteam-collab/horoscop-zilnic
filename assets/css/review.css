@@ -90,30 +90,52 @@
     margin-bottom: 1.25rem;
 }
 
-/* Butonul: chenar subtire, in culoarea textului temei. Deliberat DISCRET - un buton
-   portocaliu cu „CUMPARA ACUM" sub fiecare produs transforma vizual editorialul in
-   catalog, adica exact tiparul pe care regulamentul eMAG il sanctioneaza. Castigam
-   cea mai mare parte din diferenta de click fata de un link simplu, fara sa aruncam
-   pagina in zona comerciala. */
+/* Butonul: PLIN si colorat, ca sa se vada ca e o actiune - un chenar subtire se
+   pierde in text si primeste vizibil mai putine clickuri.
+   Culoarea se schimba per site cu o singura variabila (--hz-btn-bg), fara sa
+   atingem pluginul: unele teme au accent albastru, altele visiniu.
+   Ce NU facem: rosu de urgenta, majuscule, iconita de cos. Cosul ar promite ca
+   adaugi produsul undeva, iar clickul duce de fapt pe pagina produsului din
+   magazin - iar sageata spune adevarul: pleci de pe site. */
 .hz-product-cta {
-    margin: .75rem 0 0;
+    margin: .85rem 0 0;
 }
 
 .hz-product-btn {
-    display: inline-block;
-    padding: .5rem 1.1rem;
-    border: 1.5px solid currentColor;
-    border-radius: 6px;
+    --hz-btn-bg: #1a73e8;
+    --hz-btn-fg: #fff;
+
+    display: inline-flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .7rem 1.4rem;
+    border: 0;
+    border-radius: 8px;
+    background: var(--hz-btn-bg);
+    color: var(--hz-btn-fg);
     font-weight: 600;
-    font-size: .95em;
+    font-size: 1em;
     line-height: 1.2;
     text-decoration: none;
+    transition: filter .15s ease, transform .15s ease;
+}
+
+.hz-product-btn::after {
+    content: "→";      /* sageata: spune ca pleci catre magazin */
+    font-size: 1.05em;
+    line-height: 1;
 }
 
 .hz-product-btn:hover,
 .hz-product-btn:focus {
+    color: var(--hz-btn-fg);
     text-decoration: none;
-    opacity: .8;
+    filter: brightness(1.08);
+    transform: translateY(-1px);
+}
+
+.hz-product-btn:active {
+    transform: translateY(0);
 }
 
 /* --- Compatibilitate cu articolele generate INAINTE de v3.16.7 ---
