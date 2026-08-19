@@ -90,6 +90,32 @@
     margin-bottom: 1.25rem;
 }
 
+/* Butonul: chenar subtire, in culoarea textului temei. Deliberat DISCRET - un buton
+   portocaliu cu „CUMPARA ACUM" sub fiecare produs transforma vizual editorialul in
+   catalog, adica exact tiparul pe care regulamentul eMAG il sanctioneaza. Castigam
+   cea mai mare parte din diferenta de click fata de un link simplu, fara sa aruncam
+   pagina in zona comerciala. */
+.hz-product-cta {
+    margin: .75rem 0 0;
+}
+
+.hz-product-btn {
+    display: inline-block;
+    padding: .5rem 1.1rem;
+    border: 1.5px solid currentColor;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: .95em;
+    line-height: 1.2;
+    text-decoration: none;
+}
+
+.hz-product-btn:hover,
+.hz-product-btn:focus {
+    text-decoration: none;
+    opacity: .8;
+}
+
 /* --- Compatibilitate cu articolele generate INAINTE de v3.16.7 ---
    Au in continut markup-ul vechi (numar + nume + poza ca elemente inline). Fara
    regulile astea, CSS-ul nou le aseaza aiurea: poza sare in dreapta si cardul arata

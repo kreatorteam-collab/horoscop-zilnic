@@ -429,6 +429,31 @@ class HZ_Review {
         }
     }
 
+    /**
+     * Butonul din card. Text implicit: „Vezi prețul actual".
+     *
+     * De ce ăsta: din articol lipsesc INTENȚIONAT prețurile (se schimbă, iar articolul
+     * rămâne cu informație falsă), deci întrebarea care rămâne în capul cititorului
+     * după recomandare e chiar prețul. Butonul îi răspunde cinstit și îl duce unde
+     * află — fără să promită o reducere și fără să-i comande să cumpere.
+     *
+     * Evitat deliberat: „Cumpără acum" (comandă o acțiune pe care nu noi o facem și
+     * împinge pagina în zona de magazin) și „Vezi oferta" / „Cel mai bun preț" (sună a
+     * promoție, iar eMAG interzice explicit unghiul de reduceri).
+     *
+     * Textul se schimbă de la distanță prin opțiunea `hz_review_button`, iar un text
+     * gol scoate butonul cu totul — testarea nu cere versiune nouă de plugin.
+     */
+    public static function button_html($href) {
+        $text = trim((string) get_option('hz_review_button', 'Vezi prețul actual'));
+        $text = (string) apply_filters('hz_review_button_text', $text);
+        if ($text === '') { return ''; }
+
+        return '<p class="hz-product-cta">'
+             . '<a class="hz-product-btn" href="' . $href . '" rel="sponsored nofollow" target="_blank">'
+             . esc_html($text) . '</a></p>';
+    }
+
     private static function wrap_paragraph($content, $p, $nr, $img, $cursor) {
         $needle = self::fold_text($p['name']);
         if ($needle === '') { return null; }
@@ -466,6 +491,7 @@ class HZ_Review {
               . esc_html($p['name']) . '</a>'
               . '</p>'
               . '<p class="hz-product-text">' . $inner . '</p>'
+              . self::button_html($href)
               . '</div></div>';
 
         $new = substr($content, 0, $start) . $card . substr($content, $end + 4);
