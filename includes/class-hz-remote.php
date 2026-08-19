@@ -404,35 +404,68 @@ class HZ_Remote {
         }
         $hard = !empty($data['hard']);
         $done = array();
-        $missing = 0;
+        $not_found = array();
+
+        // Potrivire TOLERANTĂ, nu egalitate exactă pe post_title: între titlul comandat
+        // din panou și cel salvat de WordPress se pot strecura diferențe de spații, de
+        // majuscule sau ghilimele schimbate de wptexturize. Cu egalitate strictă,
+        // ștergerea „reușea" raportând zero, ceea ce arată exact ca și cum n-ar merge.
+        global $wpdb;
+        $rows = $wpdb->get_results(
+            "SELECT ID, post_title FROM {$wpdb->posts}
+             WHERE post_type = 'post'
+               AND post_status IN ('publish','draft','pending','future','private')
+             ORDER BY ID DESC LIMIT 2000"
+        );
+
+        $index = array();
+        foreach ($rows as $row) {
+            $index[self::norm_title($row->post_title)][] = (int) $row->ID;
+        }
 
         foreach (array_slice($titles, 0, 200) as $t) {
-            $title = wp_strip_all_tags((string) $t);
-            if (trim($title) === '') { continue; }
-
-            $ids = get_posts(array(
-                'post_type'      => 'post',
-                // Coșul e exclus: un articol deja acolo nu mai are ce fi „șters".
-                'post_status'    => array('publish', 'draft', 'pending', 'future', 'private'),
-                'title'          => $title,
-                'posts_per_page' => 5,
-                'fields'         => 'ids',
-                'no_found_rows'  => true,
-            ));
-            if (empty($ids)) { $missing++; continue; }
-
-            foreach ($ids as $id) {
+            $key = self::norm_title(wp_strip_all_tags((string) $t));
+            if ($key === '') { continue; }
+            if (empty($index[$key])) {
+                $not_found[] = mb_substr((string) $t, 0, 60);
+                continue;
+            }
+            foreach ($index[$key] as $id) {
                 $ok = $hard ? wp_delete_post($id, true) : wp_trash_post($id);
                 if ($ok) { $done[] = (int) $id; }
             }
         }
 
         return array(
-            'ok'      => true,
-            'trashed' => count($done),
-            'missing' => $missing,
-            'hard'    => $hard ? 1 : 0,
+            'ok'        => true,
+            'trashed'   => count($done),
+            'missing'   => count($not_found),
+            // Titlurile negăsite, ca panoul să poată spune CARE - altfel „0 șterse"
+            // e un mesaj din care nu poți afla nimic.
+            'not_found' => array_slice($not_found, 0, 5),
+            'hard'      => $hard ? 1 : 0,
         );
+    }
+
+    /**
+     * Titlu normalizat pentru comparat: fără majuscule, fără diacritice, cu spațiile
+     * strânse și cu ghilimelele/liniuțele „frumoase" aduse la forma simplă — exact
+     * transformările pe care le face wptexturize la salvare și care fac ca titlul
+     * comandat să nu mai fie identic cu cel din baza de date.
+     */
+    private static function norm_title($t) {
+        $t = wp_strip_all_tags((string) $t);
+        $t = html_entity_decode($t, ENT_QUOTES, 'UTF-8');
+        $t = strtr($t, array(
+            '„' => '"', '”' => '"', '“' => '"', '’' => "'", '‘' => "'",
+            '–' => '-', '—' => '-', '×' => 'x',
+            'ă' => 'a', 'â' => 'a', 'î' => 'i', 'ș' => 's', 'ț' => 't',
+            'ş' => 's', 'ţ' => 't',
+            'Ă' => 'a', 'Â' => 'a', 'Î' => 'i', 'Ș' => 's', 'Ț' => 't',
+            'Ş' => 's', 'Ţ' => 't',
+        ));
+        $t = preg_replace('/\s+/u', ' ', $t);
+        return trim(mb_strtolower($t));
     }
 
     /** start | stop | retry | clear */
