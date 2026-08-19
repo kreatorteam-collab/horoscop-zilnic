@@ -254,9 +254,12 @@ class HZ_Bulk {
                     unset($known[$key]); // titlul rămâne disponibil pentru o comandă corectă
                     continue;
                 }
+                // v3.16.1: doar produsele FĂRĂ poză se leagă în text. Cele cu poză își
+                // au linkul în blocul numerotat, iar dacă le legam și în text ajungeau
+                // la trei linkuri fiecare (nume + poză + legendă).
                 if (class_exists('HZ_Links')) {
                     $links = HZ_Links::sanitize_list(
-                        array_merge(HZ_Review::to_links($prod), $links),
+                        array_merge(HZ_Review::to_links($prod, true), $links),
                         HZ_Review::MAX_PRODUCTS + 2
                     );
                 }

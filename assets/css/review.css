@@ -1,57 +1,86 @@
 /**
  * Blocul de produs din articolele „editorial cu produse".
  *
- * Deliberat discret și îngust: produsul ilustrează un argument făcut în paragraful
- * de deasupra, nu deschide un raft. De aceea nu e grilă, nu e card cu chenar gros,
- * nu are buton de cumpărare — doar poza, numele și legătura.
+ * v3.16.1: listă numerotată, pe toată lățimea. Varianta flotantă de dinainte
+ * derapa vizual — pe ecran lat blocul ajungea lângă paragraful greșit, iar
+ * articolul arăta dezordonat.
+ *
+ * Deliberat discret: fără chenar gros, fără buton de cumpărare, fără preț.
+ * Produsul ilustrează argumentul din paragraful de deasupra, nu deschide un raft.
  */
 .hz-product {
-    margin: 1rem 0 1.5rem;
-    padding: 0;
-    max-width: 320px;
-    text-align: center;
+    display: flex;
+    align-items: center;
+    gap: .9rem;
+    margin: 1rem 0 1.4rem;
+    padding: .75rem;
+    border: 1px solid rgba(128, 128, 128, .22);
+    border-radius: 8px;
 }
 
-.hz-product img,
+/* Numărul: reia ordinea din listă, ca articolul să se citească ca un top. */
+.hz-product-nr {
+    flex: 0 0 auto;
+    width: 2rem;
+    height: 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: rgba(128, 128, 128, .14);
+    font-weight: 700;
+    font-size: .95rem;
+    line-height: 1;
+}
+
+.hz-product-thumb {
+    flex: 0 0 auto;
+    display: block;
+    line-height: 0;
+}
+
+.hz-product-thumb img,
 .hz-product .hz-product-img {
-    max-width: 100%;
-    height: auto;
+    width: 92px;
+    height: 92px;
+    object-fit: contain;
     border-radius: 6px;
     display: block;
-    margin: 0 auto;
 }
 
-.hz-product figcaption {
-    margin-top: .5rem;
-    font-size: .9em;
+.hz-product-name {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.hz-product-name a {
+    font-weight: 600;
+    text-decoration: none;
     line-height: 1.35;
 }
 
-.hz-product figcaption a {
-    text-decoration: none;
-    font-weight: 600;
-}
-
-.hz-product figcaption a:hover {
+.hz-product-name a:hover {
     text-decoration: underline;
 }
 
-/* Nota de dezvăluire a afilierii: vizibilă, dar nu strigătoare. Trebuie citită,
-   nu ignorată — de asta nu e la subsol și nu e gri pe gri. */
+/* Pe telefon: numărul și poza rămân pe rând, numele trece dedesubt dacă e lung. */
+@media (max-width: 480px) {
+    .hz-product {
+        flex-wrap: wrap;
+        gap: .6rem;
+    }
+
+    .hz-product-name {
+        flex: 1 1 100%;
+    }
+}
+
+/* Nota de dezvăluire a afilierii (oprită implicit din v3.16.1, dar stilul rămâne
+   pentru site-urile care o pornesc). */
 .hz-affiliate-note {
     font-size: .9em;
     opacity: .85;
     border-left: 3px solid currentColor;
     padding-left: .75rem;
     margin-bottom: 1.25rem;
-}
-
-@media (min-width: 600px) {
-    /* Pe ecran lat, blocul stă lângă text ca o ilustrație de articol, nu ca un rând
-       de catalog care taie lectura. */
-    .hz-product {
-        float: right;
-        margin: .25rem 0 1rem 1.5rem;
-        max-width: 260px;
-    }
 }

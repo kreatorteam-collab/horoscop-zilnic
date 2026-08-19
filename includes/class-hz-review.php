@@ -100,9 +100,13 @@ class HZ_Review {
      * sponsored. Astfel refolosim garanția existentă („linkul TREBUIE să existe în
      * articol"), inclusiv plasa de siguranță când modelul nu folosește numele exact.
      */
-    public static function to_links($products) {
+    public static function to_links($products, $only_without_image = false) {
         $links = array();
         foreach ((array) $products as $p) {
+            // v3.16.1: produsele CU poză nu se mai leagă în text. Aveau trei linkuri
+            // fiecare (numele din text + poza + legenda blocului), ceea ce transformă
+            // articolul într-un covor de linkuri. Singurul link rămâne blocul.
+            if ($only_without_image && !empty($p['image'])) { continue; }
             $links[] = array(
                 'anchor' => $p['name'],
                 'url'    => $p['url'],
@@ -190,6 +194,13 @@ class HZ_Review {
     /** Adaugă nota de dezvăluire la începutul articolului (o singură dată). */
     public static function add_disclosure($content) {
         $content = (string) $content;
+        // OPRITĂ implicit din v3.16.1, la cererea explicită a userului. Rămâne
+        // comandabilă de la distanță (`hz_review_disclosure`, prin hz/v1/settings), ca
+        // repornirea pe toată flota să fie o comandă, nu o versiune nouă de plugin.
+        //
+        // Notă tehnică, nu insistență: rel="sponsored nofollow" de pe linkuri rămâne
+        // pus indiferent de setarea asta — el e semnalul citit automat de Google.
+        if ((int) get_option('hz_review_disclosure', 0) !== 1) { return $content; }
         if (strpos($content, 'hz-affiliate-note') !== false) { return $content; }
 
         $note = '<p class="hz-affiliate-note"><em>' . esc_html(self::disclosure()) . '</em></p>' . "\n";
@@ -250,7 +261,9 @@ class HZ_Review {
     public static function insert_product_blocks($content, $products, $attachments) {
         if (empty($products) || empty($attachments)) { return $content; }
 
+        $nr = 0;
         foreach ($products as $p) {
+            $nr++;
             if (empty($attachments[$p['url']])) { continue; }
             $att = (int) $attachments[$p['url']];
 
@@ -261,12 +274,19 @@ class HZ_Review {
             ));
             if (!$img) { continue; }
 
+            // Numerotat și pe toată lățimea, nu flotant: pe ecran lat blocurile
+            // flotante derivau lângă paragraful GREȘIT, iar articolul arăta dezordonat.
+            // Numărul vine din ordinea produselor din lot, deci corespunde ordinii în
+            // care modelul le-a primit și le recomandă.
             $href  = esc_url($p['url']);
-            $block = '<figure class="hz-product">'
-                   . '<a href="' . $href . '" rel="sponsored nofollow" target="_blank">' . $img . '</a>'
-                   . '<figcaption><a href="' . $href . '" rel="sponsored nofollow" target="_blank">'
-                   . esc_html($p['name']) . '</a></figcaption>'
-                   . '</figure>';
+            $block = '<div class="hz-product" id="produs-' . $nr . '">'
+                   . '<span class="hz-product-nr">' . $nr . '</span>'
+                   . '<a class="hz-product-thumb" href="' . $href . '" rel="sponsored nofollow" target="_blank">'
+                   . $img . '</a>'
+                   . '<span class="hz-product-name">'
+                   . '<a href="' . $href . '" rel="sponsored nofollow" target="_blank">'
+                   . esc_html($p['name']) . '</a></span>'
+                   . '</div>';
 
             $content = self::place_after_mention($content, $p, $block);
         }
@@ -274,20 +294,46 @@ class HZ_Review {
     }
 
     /**
-     * Inserează blocul după paragraful care conține linkul produsului. Fără paragraf
-     * potrivit, nu inserăm nimic — un bloc rătăcit la finalul articolului arată exact
-     * ca raftul de catalog pe care îl evităm.
+     * Inserează blocul după paragraful în care e recomandat produsul.
+     *
+     * Caută întâi linkul (dacă produsul a fost și legat în text), apoi NUMELE lui.
+     * A doua cale e cea normală de la v3.16.1: produsele cu poză nu se mai leagă în
+     * text, ca să nu apară de trei ori (text + poză + legendă) — singurul link rămâne
+     * blocul.
+     *
+     * Fără paragraf potrivit nu inserăm nimic: un bloc rătăcit la finalul articolului
+     * arată exact ca raftul de catalog pe care îl evităm.
      */
     private static function place_after_mention($content, $p, $block) {
-        $needle = 'href="' . $p['url'] . '"';
-        $pos = stripos($content, $needle);
-        if ($pos === false) { return $content; }
+        $pos = stripos($content, 'href="' . $p['url'] . '"');
+
+        if ($pos === false) {
+            // Numele, fără diacritice și majuscule — modelul scrie „Saltea Evrik
+            // Confort PLUS", catalogul poate avea „SALTEA EVRIK CONFORT plus".
+            $hay = self::fold_text($content);
+            $needle = self::fold_text($p['name']);
+            if ($needle === '') { return $content; }
+            $pos = strpos($hay, $needle);
+            if ($pos === false) { return $content; }
+        }
 
         $end = stripos($content, '</p>', $pos);
         if ($end === false) { return $content; }
         $end += 4;
 
         return substr($content, 0, $end) . "\n" . $block . substr($content, $end);
+    }
+
+    /**
+     * Diacriticele românești → ASCII, 1:1 pe caracter, plus litere mici. Harta e
+     * caracter-cu-caracter tocmai ca pozițiile din textul transformat să rămână
+     * valide în textul original.
+     */
+    private static function fold_text($s) {
+        return strtolower(strtr((string) $s, array(
+            'ă' => 'a', 'â' => 'a', 'î' => 'i', 'ș' => 's', 'ş' => 's', 'ț' => 't', 'ţ' => 't',
+            'Ă' => 'A', 'Â' => 'A', 'Î' => 'I', 'Ș' => 'S', 'Ş' => 'S', 'Ț' => 'T', 'Ţ' => 'T',
+        )));
     }
 
     /**
