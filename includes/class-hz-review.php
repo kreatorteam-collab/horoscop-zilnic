@@ -76,7 +76,10 @@ class HZ_Review {
             $out[] = array(
                 'name' => $name,
                 'url'  => $url,
-                'note' => mb_substr($note, 0, 160),
+                // 220, nu 160: nota e titlul complet din catalog, iar acolo stau
+                // atributele reale („160x200, Memory Foam, 7 zone de confort"). Tăiat
+                // prea scurt, rămâne doar brandul și modelul n-are pe ce se sprijini.
+                'note' => mb_substr($note, 0, 220),
             );
             if (count($out) >= self::MAX_PRODUCTS) { break; }
         }
@@ -132,7 +135,10 @@ class HZ_Review {
             . "4. Un capitol <h2> cu greșeli frecvente sau lucruri de evitat.\n"
             . "5. O concluzie scurtă care ajută cititorul să decidă singur.\n\n"
 
-            . "PRODUSELE (folosește numele EXACT, o singură dată fiecare, în capitolul de recomandări):\n"
+            . "PRODUSELE (folosește numele EXACT, o singură dată fiecare, în capitolul de recomandări).\n"
+            . "După liniuță e titlul din catalog — SINGURA informație factuală pe care o ai despre "
+            . "produs. Deduci din el ce poți (dimensiuni, material, tip) și te oprești acolo: orice "
+            . "altceva ar fi inventat.\n"
             . implode("\n", $lista) . "\n\n"
 
             . "REGULI STRICTE:\n"
