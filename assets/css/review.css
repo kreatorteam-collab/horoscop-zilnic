@@ -42,25 +42,10 @@
     min-width: 0;
 }
 
-/* Titlul: numarul din lista + numele produsului (singurul link din card). */
+/* Titlul: numele produsului, singurul link din card. */
 .hz-product-title {
     margin: 0 0 .5rem;
     line-height: 1.35;
-}
-
-.hz-product-nr {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 1.75rem;
-    height: 1.75rem;
-    margin-right: .55rem;
-    border-radius: 50%;
-    background: rgba(128, 128, 128, .16);
-    font-weight: 700;
-    font-size: .9rem;
-    line-height: 1;
-    vertical-align: middle;
 }
 
 .hz-product-title a {
@@ -103,4 +88,22 @@
     border-left: 3px solid currentColor;
     padding-left: .75rem;
     margin-bottom: 1.25rem;
+}
+
+/* --- Compatibilitate cu articolele generate INAINTE de v3.16.7 ---
+   Au in continut markup-ul vechi (numar + nume + poza ca elemente inline). Fara
+   regulile astea, CSS-ul nou le aseaza aiurea: poza sare in dreapta si cardul arata
+   rupt. Nu le face frumoase, doar le tine ordonate pana la regenerare. */
+.hz-product > .hz-product-nr {
+    display: none;
+}
+
+.hz-product > .hz-product-thumb,
+.hz-product > .hz-product-name {
+    display: block;
+    width: 100%;
+}
+
+.hz-product > .hz-product-thumb {
+    order: -1;
 }

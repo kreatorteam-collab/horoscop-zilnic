@@ -398,8 +398,9 @@ class HZ_Review {
         $card = '<div class="hz-product" id="produs-' . $nr . '">'
               . '<div class="hz-product-media">' . $img . '</div>'
               . '<div class="hz-product-body">'
+              // Fara numar (v3.16.7): articolul nu e un clasament, iar numerotarea
+              // promitea o ierarhie pe care textul nu o sustine. Poza ramane in stanga.
               . '<p class="hz-product-title">'
-              . '<span class="hz-product-nr">' . $nr . '</span>'
               // Poza NU e link: un singur link per produs, pe nume.
               . '<a href="' . $href . '" rel="sponsored nofollow" target="_blank">'
               . esc_html($p['name']) . '</a>'
