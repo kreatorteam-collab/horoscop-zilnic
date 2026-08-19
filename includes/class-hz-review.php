@@ -374,11 +374,71 @@ class HZ_Review {
         return $bestCount >= 2 ? $best : 0;
     }
 
+    /**
+     * Pozitia (in textul ORIGINAL) a primei aparitii a lui $needle dupa $from,
+     * cautand fara diacritice si fara majuscule.
+     *
+     * Aplatizarea schimba lungimea sirului (diacriticele romanesti au doi octeti in
+     * UTF-8, inlocuitorii ASCII unul singur), deci construim si o harta
+     * pozitie_aplatizata -> pozitie_originala. Altfel offset-ul intors e mai mic decat
+     * cel real, cu cate o unitate pentru fiecare diacritica dinainte.
+     *
+     * @return int|false
+     */
+    private static function find_in_folded($haystack, $needle, $from = 0) {
+        if ($needle === '') { return false; }
+
+        $tr = array(
+            'ă' => 'a', 'â' => 'a', 'î' => 'i', 'ș' => 's', 'ț' => 't',
+            'ş' => 's', 'ţ' => 't', 'Ă' => 'a', 'Â' => 'a', 'Î' => 'i',
+            'Ș' => 's', 'Ț' => 't', 'Ş' => 's', 'Ţ' => 't',
+        );
+
+        $flat = '';
+        $map  = array();
+        $i = 0;
+        $n = strlen($haystack);
+        while ($i < $n) {
+            $hit = null;
+            foreach ($tr as $k => $v) {
+                if ($haystack[$i] === $k[0] && substr($haystack, $i, strlen($k)) === $k) {
+                    $hit = array($k, $v);
+                    break;
+                }
+            }
+            if ($hit !== null) {
+                $map[strlen($flat)] = $i;
+                $flat .= $hit[1];
+                $i += strlen($hit[0]);
+            } else {
+                $map[strlen($flat)] = $i;
+                $flat .= strtolower($haystack[$i]);
+                $i++;
+            }
+        }
+
+        // Sarim aparitiile dinaintea cursorului (in coordonate ORIGINALE).
+        $at = 0;
+        while (true) {
+            $hitFlat = strpos($flat, $needle, $at);
+            if ($hitFlat === false) { return false; }
+            $orig = isset($map[$hitFlat]) ? $map[$hitFlat] : false;
+            if ($orig === false) { return false; }
+            if ($orig >= $from) { return $orig; }
+            $at = $hitFlat + 1;
+        }
+    }
+
     private static function wrap_paragraph($content, $p, $nr, $img, $cursor) {
         $needle = self::fold_text($p['name']);
         if ($needle === '') { return null; }
 
-        $pos = strpos(self::fold_text($content), $needle, $cursor);
+        // Cautam in textul „aplatizat" (fara diacritice, litere mici), dar avem nevoie
+        // de pozitia din textul ORIGINAL: aplatizarea SCURTEAZA sirul, fiindca „a" pe
+        // doi octeti devine „a" pe unul. Fara harta de pozitii, decalajul se aduna la
+        // fiecare diacritica si cardul ajunge peste alt paragraf - exact cum au iesit
+        // carduri cu titlul unui produs si textul altuia.
+        $pos = self::find_in_folded($content, $needle, $cursor);
         if ($pos === false) { return null; }
 
         // Paragraful care il contine: ultima deschidere <p> dinaintea numelui.
