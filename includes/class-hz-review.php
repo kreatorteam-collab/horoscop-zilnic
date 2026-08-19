@@ -322,8 +322,9 @@ class HZ_Review {
                    . '<span class="hz-product-name">'
                    . '<a href="' . $href . '" rel="sponsored nofollow" target="_blank">'
                    . esc_html($p['name']) . '</a></span>'
-                   . '<a class="hz-product-thumb" href="' . $href . '" rel="sponsored nofollow" target="_blank">'
-                   . $img . '</a>'
+                   // Poza NU e link (v3.16.5): un singur link per produs, pe nume.
+                   // Altfel același produs are două linkuri identice unul sub altul.
+                   . '<span class="hz-product-thumb">' . $img . '</span>'
                    . '</div>';
 
             $content = self::place_after_mention($content, $p, $block);
