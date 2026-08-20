@@ -42,17 +42,6 @@
     min-width: 0;
 }
 
-/* Titlul: numele produsului, text simplu (singurul link din card e butonul). */
-.hz-product-title {
-    margin: 0 0 .5rem;
-    line-height: 1.35;
-}
-
-.hz-product-title strong {
-    font-weight: 700;
-    font-size: 1.05em;
-}
-
 .hz-product-text {
     margin: 0;
 }

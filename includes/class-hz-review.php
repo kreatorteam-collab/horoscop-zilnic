@@ -485,12 +485,10 @@ class HZ_Review {
               . '<div class="hz-product-body">'
               // Fara numar (v3.16.7): articolul nu e un clasament, iar numerotarea
               // promitea o ierarhie pe care textul nu o sustine. Poza ramane in stanga.
-              // Titlul e TEXT SIMPLU (v3.17.2): singurul link din card e butonul.
-              // Numele ca link nu adauga nimic - duce in acelasi loc - si umple
-              // articolul de linkuri colorate.
-              . '<p class="hz-product-title">'
-              . '<strong>' . esc_html($p['name']) . '</strong>'
-              . '</p>'
+              // FARA titlu separat (v3.18.3): numele aparea de doua ori la rand -
+              // o data ca titlu, o data la inceputul paragrafului. Il pastram pe cel din
+              // paragraf, care e garantat sa existe: dupa el cautam paragraful ca sa
+              // plasam cardul, deci nu poate lipsi.
               . '<p class="hz-product-text">' . $inner . '</p>'
               . self::button_html($href)
               . '</div></div>';
