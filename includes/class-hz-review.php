@@ -163,6 +163,13 @@ class HZ_Review {
             . "- NU scrie linkuri, adrese web (URL) sau nume de magazine online. De linkuri mă ocup eu.\n"
             . "- NU inventa teste, măsurători, premii sau păreri de utilizatori pe care nu le ai. "
             . "Scrie din raționament practic, nu din date pe care nu le deții.\n"
+            // Modelul a inventat variante („…Luxe - Walnut, Gold") plecând de la tiparul
+            // numelor primite: articolul recomanda 8 produse, dintre care 6 nu existau
+            // și n-aveau link. Un cititor care le caută nu le găsește.
+            . "- NU inventa ALTE produse sau variante de culoare, dimensiune ori finisaj, "
+            . "chiar dacă numele celor de mai sus par să facă parte dintr-o gamă. Scrie EXACT "
+            . "{$n} paragrafe de recomandare, câte unul pentru fiecare produs din listă, și "
+            . "niciunul în plus. Dacă ți se pare puțin, scrie mai amănunțit despre fiecare.\n"
             . "- NU folosi superlative de reclamă („cel mai bun de pe piață”, „revoluționar”, „incredibil”).\n"
             . "- Scrie la persoana a doua, direct către cititor, ca un sfat de la cineva care se pricepe.\n"
             . "- Produsul este ILUSTRAȚIA unui sfat, nu subiectul articolului. Dacă ai scoate numele "
