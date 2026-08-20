@@ -454,6 +454,19 @@ class HZ_Review {
              . esc_html($text) . '</a></p>';
     }
 
+    /**
+     * Scoate <strong>/<b> din jurul numelui produsului, oriunde apare in paragraf.
+     * Nu atinge alte ingrosari din text - doar pe cea a numelui.
+     */
+    private static function unbold_name($html, $name) {
+        $quoted = preg_quote($name, '#');
+        return preg_replace(
+            '#<(strong|b)\b[^>]*>\s*(' . $quoted . ')\s*</\1>#iu',
+            '$2',
+            $html
+        );
+    }
+
     private static function wrap_paragraph($content, $p, $nr, $img, $cursor) {
         $needle = self::fold_text($p['name']);
         if ($needle === '') { return null; }
@@ -478,6 +491,11 @@ class HZ_Review {
         if ($end === false) { return null; }
 
         $inner = substr($content, $inner_from, $end - $inner_from);
+        // Modelul incepe paragraful cu numele produsului INGROSAT. Cu titlul <h3>
+        // deasupra, ingrosarea face ca acelasi nume sa apara de doua ori cu aceeasi
+        // greutate - arata a repetitie, nu a structura. Scoatem doar <strong>-ul,
+        // numele ramane in fraza (fara el, propozitia s-ar rupe).
+        $inner = self::unbold_name($inner, $p['name']);
         $href  = esc_url($p['url']);
 
         $card = '<div class="hz-product" id="produs-' . $nr . '">'
@@ -485,10 +503,10 @@ class HZ_Review {
               . '<div class="hz-product-body">'
               // Fara numar (v3.16.7): articolul nu e un clasament, iar numerotarea
               // promitea o ierarhie pe care textul nu o sustine. Poza ramane in stanga.
-              // FARA titlu separat (v3.18.3): numele aparea de doua ori la rand -
-              // o data ca titlu, o data la inceputul paragrafului. Il pastram pe cel din
-              // paragraf, care e garantat sa existe: dupa el cautam paragraful ca sa
-              // plasam cardul, deci nu poate lipsi.
+              // Titlul e <h3>, nu paragraf ingrosat (v3.18.4): numele aparea de doua ori
+              // cu aceeasi greutate vizuala si parea o repetitie. Ca titlu adevarat,
+              // devine ierarhie - iar din paragraf ii scoatem ingrosarea (mai jos).
+              . '<h3 class="hz-product-title">' . esc_html($p['name']) . '</h3>'
               . '<p class="hz-product-text">' . $inner . '</p>'
               . self::button_html($href)
               . '</div></div>';

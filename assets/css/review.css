@@ -42,6 +42,15 @@
     min-width: 0;
 }
 
+/* Titlul: <h3> adevarat, ca sa fie ierarhie, nu inca un rand ingrosat.
+   Numele apare si la inceputul paragrafului (de acolo stim unde sa punem cardul),
+   dar acolo i se scoate ingrosarea - altfel arata a repetitie. */
+.hz-product-title {
+    margin: 0 0 .5rem;
+    font-size: 1.15em;
+    line-height: 1.3;
+}
+
 .hz-product-text {
     margin: 0;
 }
