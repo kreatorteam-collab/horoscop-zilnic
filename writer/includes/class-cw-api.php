@@ -232,7 +232,7 @@ class CW_API {
      * `annotations`). Nu facem continuare prin prefill aici — dăm de la început
      * `max_output_tokens` generos, fiindcă un al doilea apel ar relua căutările.
      */
-    private static function generate_openai_web($model_id, $user_prompt, $max_tokens = null) {
+    private static function generate_openai_web($model_id, $user_prompt, $max_tokens = null, $rescue = false) {
         if ($max_tokens === null) { $max_tokens = (int) get_option('cw_max_tokens', 8000); }
         $max_tokens = max(512, min(16000, (int) $max_tokens));
 
@@ -265,6 +265,13 @@ class CW_API {
         );
         $system = self::system_prompt();
         if ($system !== '') { $payload['instructions'] = $system; }
+
+        // Runda de salvare (primul apel n-a scos text): gandire minima, ca tot bugetul
+        // de iesire sa ramana pentru articol.
+        if ($rescue) {
+            $mm = CW_Models::get($model_id);
+            if (!empty($mm['effort'])) { $payload['reasoning'] = array('effort' => 'low'); }
+        }
 
         $response = wp_remote_post(self::OPENAI_RESPONSES, array(
             'headers' => self::openai_headers(),
@@ -317,6 +324,29 @@ class CW_API {
         // La Responses API, tokenii de raționament intră în max_output_tokens: dacă
         // răspunsul iese „incomplete", textul e tăiat — o raportăm, să se vadă în coadă.
         $incomplete = (isset($body['status']) && $body['status'] === 'incomplete');
+
+        // Zero caractere: cautarea web + rationamentul au mancat tot plafonul de iesire.
+        // Reincercam o data cu plafon maxim si efort minim, apoi raportam cauza.
+        if (trim($text) === '') {
+            if (!$rescue) {
+                $retry = self::generate_openai_web($model_id, $user_prompt, 16000, true);
+                if (!is_wp_error($retry)) {
+                    $retry['cost'] += $cost; // apelul gol ramane platit, il pastram in total
+                    return $retry;
+                }
+                $d = $retry->get_error_data();
+                $retry->add_data(array('cost' => $cost + (is_array($d) && isset($d['cost']) ? (float) $d['cost'] : 0)));
+                return $retry;
+            }
+            $reason = isset($body['incomplete_details']['reason']) ? (string) $body['incomplete_details']['reason'] : '';
+            return new WP_Error('cw_empty', sprintf(
+                /* translators: 1: status, 2: tokeni de iesire */
+                __('Modelul n-a întors niciun text (status=%1$s%2$s, %3$d tokeni de ieșire). Căutarea web plus raționamentul au consumat tot plafonul — mărește „Tokeni maximi” sau oprește căutarea web pentru acest lot.', 'claude-writer'),
+                isset($body['status']) ? (string) $body['status'] : '?',
+                $reason !== '' ? '/' . $reason : '',
+                isset($usage['output_tokens']) ? (int) $usage['output_tokens'] : 0
+            ), array('cost' => $cost));
+        }
 
         return array(
             'text'       => trim($text),
@@ -529,10 +559,17 @@ class CW_API {
         $full       = '';
         $cost       = 0.0;
         $last_usage = array();
-        $max_rounds = 3;
+        $max_rounds = 4;
+        $rescue     = false; // a doua sansa, cand primul apel n-a scos niciun caracter
 
         for ($round = 0; $round < $max_rounds; $round++) {
-            $payload = self::build_openai_payload($model_id, $messages, false, $max_tokens);
+            // La modelele cu rationament, tokenii de gandire intra in plafonul de iesire:
+            // daca modelul consuma tot bugetul „gandind", raspunsul vine GOL, dar taxat.
+            // In runda de salvare urcam plafonul la maxim si taiem efortul la minim.
+            $payload = self::build_openai_payload($model_id, $messages, false, $rescue ? 16000 : $max_tokens);
+            if ($rescue && isset($payload['reasoning_effort'])) {
+                $payload['reasoning_effort'] = 'low';
+            }
 
             $response = wp_remote_post(self::OPENAI_ENDPOINT, array(
                 'headers' => self::openai_headers(),
@@ -557,14 +594,32 @@ class CW_API {
                 return new WP_Error('cw_api', sprintf(__('Eroare API (%d): %s', 'claude-writer'), $code, $msg));
             }
 
-            $choice = isset($body['choices'][0]) ? $body['choices'][0] : array();
-            $text   = isset($choice['message']['content']) ? (string) $choice['message']['content'] : '';
-            $finish = isset($choice['finish_reason']) ? $choice['finish_reason'] : '';
+            $choice  = isset($body['choices'][0]) ? $body['choices'][0] : array();
+            $text    = isset($choice['message']['content']) ? (string) $choice['message']['content'] : '';
+            $finish  = isset($choice['finish_reason']) ? $choice['finish_reason'] : '';
+            $refusal = isset($choice['message']['refusal']) ? trim((string) $choice['message']['refusal']) : '';
 
             $usage      = self::normalize_openai_usage(isset($body['usage']) && is_array($body['usage']) ? $body['usage'] : array());
             $last_usage = $usage;
             $cost      += CW_Usage::log($model_id, $usage);
             $full      .= $text;
+
+            // Raspuns fara niciun caracter: reincercam O DATA cu plafon maxim si efort
+            // minim; daca nici asa nu iese text, raportam cauza exacta in coada.
+            if (trim($full) === '') {
+                if (!$rescue) {
+                    $rescue   = true;
+                    $messages = $base_messages;
+                    continue;
+                }
+                return new WP_Error('cw_empty', sprintf(
+                    /* translators: 1: finish_reason, 2: tokeni de iesire, 3: refuz eventual */
+                    __('Modelul n-a întors niciun text (finish_reason=%1$s, %2$d tokeni de ieșire%3$s). La modelele cu raționament tokenii de gândire intră în plafonul de ieșire — mărește „Tokeni maximi” sau scade efortul de raționament.', 'claude-writer'),
+                    $finish !== '' ? $finish : '?',
+                    isset($usage['output_tokens']) ? (int) $usage['output_tokens'] : 0,
+                    $refusal !== '' ? ', refuz: ' . $refusal : ''
+                ), array('cost' => $cost));
+            }
 
             if ($finish !== 'length') {
                 break; // articol terminat natural

@@ -818,8 +818,13 @@ class HZ_Bulk {
             if ($web_filter) { remove_filter('cw_web_search', $web_filter, 99); }
 
             if (is_wp_error($result)) {
-                $item['s']   = 'error';
-                $item['err'] = $result->get_error_message();
+                // Unele erori vin DUPA ce apelul a fost taxat (ex. raspuns gol la modelele
+                // cu rationament): pastram costul, ca sa se vada corect in coada.
+                $edata = $result->get_error_data();
+                if (is_array($edata) && isset($edata['cost'])) { $cost += (float) $edata['cost']; }
+                $item['s']    = 'error';
+                $item['err']  = $result->get_error_message();
+                $item['cost'] = $cost;
                 return $item;
             }
             $cost += (float) $result['cost'];
