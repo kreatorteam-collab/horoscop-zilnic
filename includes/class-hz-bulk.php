@@ -562,7 +562,7 @@ class HZ_Bulk {
             if (count($img['ids']) > 1) {
                 $post = get_post($pid);
                 if ($post instanceof WP_Post) {
-                    $content = $this->insert_images($post->post_content, array_slice($img['ids'], 1), (string) $item['t']);
+                    $content = $this->insert_images($post->post_content, array_slice($img['ids'], 1));
                     wp_update_post(array('ID' => $pid, 'post_content' => wp_slash($content)));
                 }
             }
@@ -902,7 +902,7 @@ class HZ_Bulk {
 
         // Imaginile suplimentare (după cover) intră în corp, distribuite după H2-uri.
         if (count($att_ids) > 1) {
-            $content = $this->insert_images($content, array_slice($att_ids, 1), $title);
+            $content = $this->insert_images($content, array_slice($att_ids, 1));
         }
 
         // 3) Articolul.
@@ -1104,12 +1104,12 @@ class HZ_Bulk {
     }
 
     /** Inserează imaginile în corp: după al 2-lea, apoi al 4-lea subtitlu H2. */
-    private function insert_images($content, $att_ids, $alt) {
+    private function insert_images($content, $att_ids) {
         $parts = preg_split('/(<\/h2>)/i', $content, -1, PREG_SPLIT_DELIM_CAPTURE);
         if (count($parts) < 3) {
             // Sub 1 H2 complet: punem imaginile la mijlocul textului, între paragrafe.
             foreach ($att_ids as $att) {
-                $content .= "\n" . $this->figure_html($att, $alt);
+                $content .= "\n" . $this->figure_html($att);
             }
             return $content;
         }
@@ -1123,21 +1123,22 @@ class HZ_Bulk {
             if (strtolower($part) === '</h2>') {
                 $h2++;
                 if ($h2 % 2 === 0 && $img < count($att_ids)) {
-                    $out .= "\n" . $this->figure_html($att_ids[$img], $alt) . "\n";
+                    $out .= "\n" . $this->figure_html($att_ids[$img]) . "\n";
                     $img++;
                 }
             }
         }
         // Ce n-a încăput (prea puține H2-uri) intră la final, înaintea ultimului paragraf.
         while ($img < count($att_ids)) {
-            $out .= "\n" . $this->figure_html($att_ids[$img], $alt);
+            $out .= "\n" . $this->figure_html($att_ids[$img]);
             $img++;
         }
         return $out;
     }
 
-    private function figure_html($att_id, $alt) {
-        $img = wp_get_attachment_image($att_id, 'large', false, array('alt' => $alt, 'loading' => 'lazy'));
+    private function figure_html($att_id) {
+        // alt GOL, intentionat: pozele de stock sunt decorative, nu descriu articolul.
+        $img = wp_get_attachment_image($att_id, 'large', false, array('alt' => '', 'loading' => 'lazy'));
         return '<figure class="wp-block-image size-large">' . $img . '</figure>';
     }
 

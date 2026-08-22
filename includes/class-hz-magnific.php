@@ -273,7 +273,7 @@ class HZ_Magnific {
      * Descarcă resursa în Media Library. Returnează attachment ID sau WP_Error.
      * Numără descărcarea în limita zilnică DOAR dacă apelul de download a reușit.
      */
-    public static function sideload($resource_id, $post_id, $alt) {
+    public static function sideload($resource_id, $post_id, $title) {
         if (!self::has_key()) {
             return new WP_Error('hzb_no_key', 'Cheia API Magnific nu este configurată.');
         }
@@ -322,12 +322,15 @@ class HZ_Magnific {
             return new WP_Error('hzb_dl', 'Magnific: fișierul nu a putut fi descărcat: ' . $tmp->get_error_message());
         }
 
-        $att_id = media_handle_sideload(array('name' => $filename, 'tmp_name' => $tmp), $post_id, $alt);
+        // $title ajunge doar in titlul atasamentului (ca sa se recunoasca in biblioteca
+        // media), NU in alt: pozele de stock sunt decorative, nu descriu continutul.
+        $att_id = media_handle_sideload(array('name' => $filename, 'tmp_name' => $tmp), $post_id, $title);
         if (is_wp_error($att_id)) {
             @unlink($tmp);
             return $att_id;
         }
-        update_post_meta($att_id, '_wp_attachment_image_alt', sanitize_text_field($alt));
+        // Alt GOL, explicit: fara el, tema/WP ar putea cadea inapoi pe titlu.
+        update_post_meta($att_id, '_wp_attachment_image_alt', '');
         update_post_meta($att_id, '_hzb_magnific_id', (int) $resource_id);
         return (int) $att_id;
     }
