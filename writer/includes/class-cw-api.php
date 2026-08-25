@@ -23,7 +23,32 @@ class CW_API {
     }
 
     public static function openai_key() {
+        // Cheie OpenAI PER MODUL: horoscopul si vremea pot avea cheia lor, ca sa se
+        // vada separat consumul in dashboard-ul OpenAI. Restul (bulk, editor, refresh,
+        // produse, imagini) folosesc cheia implicita. Context gol sau cheie de modul
+        // lipsa => cade pe cheia implicita, deci generarea nu se opreste niciodata.
+        $ctx = class_exists('CW_Usage') ? CW_Usage::context() : '';
+        $per_ctx = '';
+        if ($ctx === 'horoscop') {
+            $per_ctx = trim((string) CW_Crypto::decrypt(get_option('cw_openai_key_horoscope', '')));
+        } elseif ($ctx === 'vreme') {
+            $per_ctx = trim((string) CW_Crypto::decrypt(get_option('cw_openai_key_weather', '')));
+        }
+        if ($per_ctx !== '') { return $per_ctx; }
         return trim((string) CW_Crypto::decrypt(get_option('cw_openai_api_key', '')));
+    }
+
+    /** Amprenta (ultimele 4 caractere) a cheii dintr-un context, pentru verificare la distanta. */
+    public static function openai_key_last4($ctx = '') {
+        $prev = null;
+        if ($ctx !== '' && class_exists('CW_Usage')) {
+            return CW_Usage::with_context($ctx, function () {
+                $k = self::openai_key();
+                return $k === '' ? '' : substr($k, -4);
+            });
+        }
+        $k = self::openai_key();
+        return $k === '' ? '' : substr($k, -4);
     }
 
     /** True dacă există cel puțin o cheie configurată (orice provider). */

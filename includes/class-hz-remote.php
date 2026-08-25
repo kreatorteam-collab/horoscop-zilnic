@@ -134,6 +134,13 @@ class HZ_Remote {
             // articolele cu produse ar duce în gol).
             'go_links'        => class_exists('HZ_GoLinks') ? count(HZ_GoLinks::map()) : 0,
             'ai_key'          => class_exists('CW_API') && CW_API::has_key(),
+            // Amprentele cheilor OpenAI pe module (ultimele 4 caractere), ca sa se poata
+            // verifica de la distanta ce cheie foloseste fiecare, fara sa expuna cheia.
+            'openai_keys'     => class_exists('CW_API') ? array(
+                'implicit' => CW_API::openai_key_last4(''),
+                'horoscop' => CW_API::openai_key_last4('horoscop'),
+                'vreme'    => CW_API::openai_key_last4('vreme'),
+            ) : array(),
             'ai_openai'       => class_exists('CW_API') && CW_API::has_provider_key('openai'),
             'ai_anthropic'    => class_exists('CW_API') && CW_API::has_provider_key('anthropic'),
             'ai_limit_hit'    => class_exists('CW_Usage') ? CW_Usage::limit_reached() : false,
@@ -307,9 +314,11 @@ class HZ_Remote {
         $skipped = array();
 
         $secrets = array(
-            'openai_key'    => 'cw_openai_api_key',
-            'anthropic_key' => 'cw_api_key',
-            'magnific_key'  => 'hzb_magnific_key',
+            'openai_key'           => 'cw_openai_api_key',
+            'openai_key_horoscope' => 'cw_openai_key_horoscope',
+            'openai_key_weather'   => 'cw_openai_key_weather',
+            'anthropic_key'        => 'cw_api_key',
+            'magnific_key'         => 'hzb_magnific_key',
         );
 
         // Ștergere de cheie (rotire / cheie revocată): un câmp gol NU șterge (filtrul
