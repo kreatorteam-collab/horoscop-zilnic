@@ -143,8 +143,10 @@ class HZ_Horoscope {
         $override = function () use ($system) { return $system; };
         add_filter('cw_system_prompt', $override);
         // Horoscopul are sursa lui — fără căutare web (ar fi cost zilnic degeaba).
-        $result = CW_API::no_web(function () use ($model, $prompt) {
-            return CW_API::generate($model, $prompt);
+        $result = CW_Usage::with_context('horoscop', function () use ($model, $prompt) {
+            return CW_API::no_web(function () use ($model, $prompt) {
+                return CW_API::generate($model, $prompt);
+            });
         });
         remove_filter('cw_system_prompt', $override);
 

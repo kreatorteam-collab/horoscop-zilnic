@@ -813,7 +813,11 @@ class HZ_Bulk {
                 add_filter('cw_web_search', $web_filter, 99);
             }
 
-            $result = CW_API::generate($model, $prompt);
+            // Eticheta de cost: articolele „editorial cu produse" se contorizeaza separat.
+            $ctx    = $review ? 'review' : 'bulk';
+            $result = CW_Usage::with_context($ctx, function () use ($model, $prompt) {
+                return CW_API::generate($model, $prompt);
+            });
 
             if ($web_filter) { remove_filter('cw_web_search', $web_filter, 99); }
 
@@ -1066,8 +1070,10 @@ class HZ_Bulk {
         }
 
         // Fără căutare web aici: e un micro-apel de traducere, n-are nevoie de internet.
-        $qr = CW_API::no_web(function () use ($model, $title) {
-            return CW_API::generate($model, 'Translate this Romanian article title into a short English stock photo search query (3-5 generic, visual keywords). Reply with ONLY the keywords, nothing else: ' . $title, 100);
+        $qr = CW_Usage::with_context('imagini', function () use ($model, $title) {
+            return CW_API::no_web(function () use ($model, $title) {
+                return CW_API::generate($model, 'Translate this Romanian article title into a short English stock photo search query (3-5 generic, visual keywords). Reply with ONLY the keywords, nothing else: ' . $title, 100);
+            });
         });
         $query = is_wp_error($qr) ? '' : trim(preg_replace('/[^\p{L}\p{N} \-]/u', '', $qr['text']));
         if (!is_wp_error($qr)) { $out['cost'] += (float) $qr['cost']; }

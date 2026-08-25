@@ -84,8 +84,10 @@ class HZ_Rewrite {
 
         // Fără căutare web: articolul are deja informația, iar o căutare nouă ar
         // aduce exact citările pe care le scoatem.
-        $result = CW_API::no_web(function () use ($model, $post, $original) {
-            return CW_API::generate($model, self::prompt($post->post_title, $original), self::max_tokens($original));
+        $result = CW_Usage::with_context('rewrite', function () use ($model, $post, $original) {
+            return CW_API::no_web(function () use ($model, $post, $original) {
+                return CW_API::generate($model, self::prompt($post->post_title, $original), self::max_tokens($original));
+            });
         });
         if (is_wp_error($result)) {
             return array('id' => $post_id, 'error' => $result->get_error_message());

@@ -17,6 +17,7 @@ if (!defined('ABSPATH')) { exit; }
  *   hz/v1/status   -> progresul unui lot
  *   hz/v1/control  -> start | stop | retry | clear
  *   hz/v1/settings -> suprascrie chei API, cheia Magnific, modelul implicit, limitele
+ *   hz/v1/costs    -> cheltuiala AI pe zi, defalcata pe modul si pe model
  */
 class HZ_Remote {
 
@@ -28,7 +29,7 @@ class HZ_Remote {
     }
 
     public function register() {
-        $routes = array('info', 'enqueue', 'status', 'control', 'settings', 'rewrite', 'golinks', 'trash');
+        $routes = array('info', 'enqueue', 'status', 'control', 'settings', 'rewrite', 'golinks', 'trash', 'costs');
         foreach ($routes as $route) {
             register_rest_route('hz/v1', '/' . $route, array(
                 'methods'             => 'POST',
@@ -65,6 +66,43 @@ class HZ_Remote {
     /* ---------- rute ---------- */
 
     /** Ce poate face site-ul acum: chei, categorii, coadă, setări implicite. */
+    /**
+     * Cheltuiala AI a site-ului: totalul lunar, defalcarea pe model (istorica) și
+     * evidența ZILNICĂ pe module (bulk, review, imagini, horoscop, vreme, rewrite,
+     * editor). Datele zilnice există doar de la v3.22.0 încoace — înainte nu se
+     * înregistra cine cheltuie, doar cât.
+     */
+    public function handle_costs(WP_REST_Request $req) {
+        $data = $this->auth($req);
+        if ($data instanceof WP_REST_Response) { return $data; }
+
+        if (!class_exists('CW_Usage')) {
+            return array('ok' => false, 'error' => 'writer_missing');
+        }
+
+        $days = isset($data['days']) ? (int) $data['days'] : 30;
+        $daily = CW_Usage::daily($days);
+
+        $monthly = get_option('cw_cost_monthly', array());
+        $by      = get_option('cw_usage_by_model', array());
+
+        return array(
+            'ok'             => true,
+            'plugin_version' => defined('HZ_VERSION') ? HZ_VERSION : '',
+            'site_name'      => get_bloginfo('name'),
+            'zi_curenta'     => date('Y-m-d'),
+            'luna_curenta'   => CW_Usage::month_cost(),
+            'limita_lunara'  => (float) get_option('cw_monthly_cost_limit', 0),
+            'total_apeluri'  => (int) get_option('cw_calls_total', 0),
+            'total_cost'     => (float) get_option('cw_cost_total', 0),
+            'model_implicit' => (string) get_option('cw_default_model', ''),
+            'lunar'          => is_array($monthly) ? $monthly : array(),
+            'pe_model'       => is_array($by) ? $by : array(),
+            'zilnic'         => $daily,
+            'contexte'       => CW_Usage::contexts(),
+        );
+    }
+
     public function handle_info(WP_REST_Request $req) {
         $data = $this->auth($req);
         if ($data instanceof WP_REST_Response) { return $data; }
