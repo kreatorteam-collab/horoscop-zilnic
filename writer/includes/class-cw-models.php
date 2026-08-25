@@ -76,6 +76,17 @@ class CW_Models {
                 'effort'      => true,
                 'badge'    => 'ieftin',
             ),
+            'gpt-5-nano' => array(
+                'label'    => 'GPT-5 Nano',
+                'tagline'  => 'Cel mai ieftin',
+                'desc'     => 'Cel mai ieftin și rapid GPT-5. Ideal pentru volum mare foarte simplu (horoscop, vreme).',
+                'provider' => 'openai',
+                'in'       => 0.05,
+                'out'      => 0.40,
+                'temperature' => false,
+                'effort'      => true,
+                'badge'    => 'ieftin',
+            ),
             'gpt-5.1' => array(
                 'label'    => 'GPT-5.1',
                 'tagline'  => 'Linia GPT-5 clasică',
