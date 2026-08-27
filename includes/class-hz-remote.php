@@ -146,6 +146,20 @@ class HZ_Remote {
             'ai_limit_hit'    => class_exists('CW_Usage') ? CW_Usage::limit_reached() : false,
             'ai_model'        => class_exists('CW_API') ? CW_API::resolve_model('') : '',
             'ai_model_set'    => (string) get_option('cw_default_model', ''),
+            // Amprenta prompturilor editoriale: cât de lungi sunt, un hash scurt (ca
+            // să vedem care site-uri au ACELAȘI text) și dacă mai sunt pe varianta
+            // implicită a pluginului. Promptul în sine NU pleacă de pe site.
+            'prompts'         => self::prompt_fingerprints(),
+            // Textul integral al prompturilor, DOAR la cerere explicită (`with_prompts`)
+            // — panoul are nevoie de el ca să pornească de la ce e deja pe site, nu ca
+            // să-l suprascrie orbește. Apelul e semnat HMAC, ca tot restul rutei.
+            'prompt_text'     => empty($data['with_prompts']) ? null : array(
+                'system'  => (string) get_option('cw_system_prompt', ''),
+                'article' => (string) get_option('cw_article_prompt', ''),
+                'system_prev'  => (string) get_option('cw_system_prompt_prev', ''),
+                'article_prev' => (string) get_option('cw_article_prompt_prev', ''),
+            ),
+
             // Conținutul zilnic: pornit/oprit, ora, ultima rulare și modelul propriu
             // (gol = folosește modelul implicit al site-ului). Panoul poate spune
             // astfel CARE site-uri consumă zilnic, nu doar ce model au setat.
@@ -356,6 +370,38 @@ class HZ_Remote {
             }
         }
 
+        // Prompturile editoriale, împinse pe nișă din panou. Gol = neatins. Varianta
+        // dinainte se salvează o dată (`*_prev`), deci revenirea nu cere backup extern.
+        $prompts = array(
+            'system_prompt'  => 'cw_system_prompt',
+            'article_prompt' => 'cw_article_prompt',
+        );
+        foreach ($prompts as $field => $option) {
+            if (!isset($set[$field])) { continue; }
+            $value = wp_check_invalid_utf8((string) $set[$field]);
+            $value = trim(str_replace(array("
+", "
+"), "
+", $value));
+            if ($value === '') { continue; }
+            if (strlen($value) > 60000) {
+                $skipped[] = $field . ' prea lung (' . strlen($value) . ' caractere)';
+                continue;
+            }
+            // Șablonul de articol FĂRĂ {{continut}} ar arunca brieful (titlul +
+            // instrucțiunile lotului) și ar produce articole despre nimic.
+            if ($field === 'article_prompt' && strpos($value, '{{continut}}') === false) {
+                $skipped[] = 'article_prompt fără {{continut}} - refuzat';
+                continue;
+            }
+            $current = (string) get_option($option, '');
+            if ($current !== '' && $current !== $value) {
+                update_option($option . '_prev', $current, 'no');
+            }
+            update_option($option, $value, 'no');
+            $changed[] = $field;
+        }
+
         // Căutarea web e un comutator: 0/1 explicit (nu „gol = neatins", altfel n-ai
         // cum să o oprești de la distanță).
         if (isset($set['web_search']) && $set['web_search'] !== '') {
@@ -526,6 +572,35 @@ class HZ_Remote {
         ));
         $t = preg_replace('/\s+/u', ' ', $t);
         return trim(mb_strtolower($t));
+    }
+
+    /**
+     * Lungime + hash scurt + „e încă cel implicit?" pentru cele două prompturi
+     * editoriale. Hash-ul e doar pentru comparat între site-uri (sha1 pe textul
+     * normalizat), nu trimite conținutul promptului nicăieri.
+     */
+    private static function prompt_fingerprints() {
+        $out = array();
+        $map = array(
+            'system'  => array('cw_system_prompt', 'default_system_prompt'),
+            'article' => array('cw_article_prompt', 'default_article_prompt'),
+        );
+        foreach ($map as $key => $cfg) {
+            list($option, $default_fn) = $cfg;
+            $value   = (string) get_option($option, '');
+            $default = (class_exists('CW_Admin') && method_exists('CW_Admin', $default_fn))
+                ? (string) call_user_func(array('CW_Admin', $default_fn))
+                : '';
+            // Gol = site-ul folosește oricum varianta implicită la generare.
+            $effective = trim($value) === '' ? $default : $value;
+            $norm      = trim(preg_replace('/\s+/u', ' ', $effective));
+            $out[$key] = array(
+                'len'     => strlen($effective),
+                'hash'    => substr(sha1($norm), 0, 12),
+                'default' => (trim($value) === '' || $norm === trim(preg_replace('/\s+/u', ' ', $default))) ? 1 : 0,
+            );
+        }
+        return $out;
     }
 
     /** start | stop | retry | clear */
