@@ -250,6 +250,8 @@ class HZ_Remote {
             'batch'  => isset($data['batch']) ? (string) $data['batch'] : '',
             'length' => isset($data['length']) ? (int) $data['length'] : 0,
             'images' => isset($data['images']) ? $data['images'] : '',
+            // Sursa imaginilor pentru lot: 'ai' = generare OpenAI, 'magnific' = stock. Gol = setarea site-ului.
+            'img_source' => isset($data['img_source']) ? sanitize_key((string) $data['img_source']) : '',
             // Căutare web pentru lotul ăsta: absent = setarea site-ului.
             'web'    => isset($data['web']) ? $data['web'] : '',
             // Data de publicare pentru lotul ăsta: absent = setarea site-ului, 0 = azi, 1 = backdate.
@@ -359,6 +361,18 @@ class HZ_Remote {
             'horoscope_model' => 'hz_model',
             'weather_model'   => 'hzw_model',
         );
+
+        // Sursa implicita de imagini + modelul de generare AI (text simplu, nu model AI de scriere).
+        if (isset($set['img_source']) && in_array($set['img_source'], array('magnific', 'ai'), true)) {
+            update_option('hzb_img_source', $set['img_source'], 'no');
+            $changed[] = 'img_source';
+        }
+        foreach (array('imagegen_model' => 'hz_imagegen_model', 'imagegen_size' => 'hz_imagegen_size', 'imagegen_quality' => 'hz_imagegen_quality') as $f => $opt) {
+            if (isset($set[$f]) && trim((string) $set[$f]) !== '') {
+                update_option($opt, sanitize_text_field((string) $set[$f]), 'no');
+                $changed[] = $f;
+            }
+        }
         foreach ($models as $field => $option) {
             if (!isset($set[$field]) || trim((string) $set[$field]) === '') { continue; }
             $model = sanitize_text_field((string) $set[$field]);

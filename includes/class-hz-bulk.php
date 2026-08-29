@@ -206,6 +206,7 @@ class HZ_Bulk {
         $batch  = isset($opts['batch']) ? substr(preg_replace('/[^a-zA-Z0-9_\-]/', '', (string) $opts['batch']), 0, 40) : '';
         $len    = isset($opts['length']) ? (int) $opts['length'] : 0;
         $img    = isset($opts['images']) && $opts['images'] !== '' ? max(0, min(self::MAX_IMAGES, (int) $opts['images'])) : null;
+        $imgsrc = (isset($opts['img_source']) && in_array($opts['img_source'], array('magnific', 'ai'), true)) ? $opts['img_source'] : '';
         $mkcat  = !empty($opts['create_category']);
         // v3.16.0: 'review' = articol editorial cu produse (vezi HZ_Review). Orice
         // altceva = articolul obișnuit, pe șablonul editorial al site-ului.
@@ -287,6 +288,7 @@ class HZ_Bulk {
                 'b'       => $batch,
                 'len'     => $len > 0 ? max(300, $len) : 0,
                 'img'     => $img,
+                'imgsrc'  => $imgsrc,
                 'web'     => $web,
                 'rd'      => $rd,
                 'lnk'     => array('total' => count($links), 'done' => 0, 'forced' => 0),
@@ -542,7 +544,7 @@ class HZ_Bulk {
 
             if ($filled >= $batch) { $left++; continue; }
 
-            $img = $this->fetch_images((string) $item['t'], (string) $item['model'], $images);
+            $img = $this->fetch_images((string) $item['t'], (string) $item['model'], $images, (string) ($item['imgsrc'] ?? ''));
             if (empty($img['ids'])) {
                 $note = $img['note'];
                 // Cotă terminată în timpul lotului: ne oprim, restul rămân pentru mâine.
@@ -878,7 +880,7 @@ class HZ_Bulk {
         // 2) Imaginile: interogare de căutare în engleză (stocul e indexat în
         // engleză), generată de model din titlu — apel minuscul, cost neglijabil.
         $images   = $this->images_for($item);
-        $img      = $this->fetch_images($title, $model, $images);
+        $img      = $this->fetch_images($title, $model, $images, (string) ($item['imgsrc'] ?? ''));
         $att_ids  = $img['ids'];
         $img_note = $img['note'];
         $cost    += $img['cost'];
@@ -1058,12 +1060,23 @@ class HZ_Bulk {
      * minuscul. Returnează array('ids', 'note', 'cost'); folosit și la generare, și
      * la completarea ulterioară a articolelor rămase fără poză.
      */
-    private function fetch_images($title, $model, $limit) {
+    private function fetch_images($title, $model, $limit, $source = '') {
         // `blocked` = n-avem DE UNDE lua poze (cotă/credite/cheie), spre deosebire de
         // „am căutat și n-am găsit". Doar primul caz oprește publicarea articolului.
         $out = array('ids' => array(), 'note' => '', 'cost' => 0.0, 'blocked' => false);
         if ($limit < 1) { return $out; }
-        if (!HZ_Magnific::has_key()) {
+
+        // Sursa imaginilor: 'ai' = generare OpenAI (imagine unică/articol), altfel stock Magnific.
+        $source = $source !== '' ? $source : (string) get_option('hzb_img_source', 'magnific');
+        $ai = ($source === 'ai');
+
+        if ($ai) {
+            if (!class_exists('HZ_ImageGen') || !HZ_ImageGen::has_key()) {
+                $out['note'] = 'cheia OpenAI lipsește pentru generarea imaginilor';
+                $out['blocked'] = true;
+                return $out;
+            }
+        } elseif (!HZ_Magnific::has_key()) {
             $out['note']    = 'cheia API Magnific nu e configurată în setările de mai jos';
             $out['blocked'] = true;
             return $out;
@@ -1078,6 +1091,28 @@ class HZ_Bulk {
         $query = is_wp_error($qr) ? '' : trim(preg_replace('/[^\p{L}\p{N} \-]/u', '', $qr['text']));
         if (!is_wp_error($qr)) { $out['cost'] += (float) $qr['cost']; }
         if ($query === '') { $query = $title; }
+
+        // --- Sursa AI: generam $limit imagini din cuvintele cheie ---
+        if ($ai) {
+            for ($k = 0; $k < $limit; $k++) {
+                $att = HZ_ImageGen::sideload($query, 0, $title);
+                if (is_wp_error($att)) {
+                    $out['note'] = $att->get_error_message();
+                    $m = strtolower($out['note']);
+                    // Credit/cota OpenAI epuizata -> blocat azi (coada asteapta), ca la Magnific.
+                    if (strpos($m, 'quota') !== false || strpos($m, 'credit') !== false || strpos($m, 'billing') !== false) {
+                        $out['blocked'] = true;
+                        break;
+                    }
+                    continue; // o eroare punctuala nu opreste restul
+                }
+                $out['ids'][] = $att;
+            }
+            if (empty($out['ids']) && $out['note'] === '') {
+                $out['note'] = 'Generarea imaginii nu a produs rezultat pentru: ' . $query;
+            }
+            return $out;
+        }
 
         $found = HZ_Magnific::search($query, 12);
         if (is_wp_error($found)) {

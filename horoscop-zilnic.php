@@ -29,6 +29,7 @@ if (!class_exists('CW_API')) {
 require_once HZ_PATH . 'includes/class-hz-horoscope.php';
 require_once HZ_PATH . 'includes/class-hz-weather.php';
 require_once HZ_PATH . 'includes/class-hz-magnific.php';
+require_once HZ_PATH . 'includes/class-hz-imagegen.php';
 require_once HZ_PATH . 'includes/class-hz-links.php';
 require_once HZ_PATH . 'includes/class-hz-review.php';
 require_once HZ_PATH . 'includes/class-hz-golinks.php';
