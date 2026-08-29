@@ -33,25 +33,37 @@ class HZ_ImageGen {
         return in_array($q, $allowed, true) ? $q : 'medium';
     }
 
-    /** Construieste un prompt fotorealist din cuvintele cheie (engleza) ale articolului. */
-    public static function build_prompt($keywords) {
+    /** Stilul de imagine al site-ului (gol = fara stil impus). Setabil remote. */
+    public static function style() {
+        return trim((string) get_option('hz_imagegen_style', ''));
+    }
+
+    /**
+     * Construieste promptul. $keywords = subiectul (cuvinte cheie EN din titlu),
+     * $style = instructiuni de stil comune lotului (ex. „fotografii de mancare, vedere de sus").
+     */
+    public static function build_prompt($keywords, $style = '') {
         $kw = trim((string) $keywords);
         if ($kw === '') { $kw = 'a relevant scene'; }
-        return 'A realistic editorial photograph about ' . $kw . '. Natural lighting, candid '
-             . 'documentary style, shot on 50mm, shallow depth of field, high detail, '
-             . 'no text, no watermark, no logos, no collage.';
+        $style = trim((string) $style);
+        if ($style === '') { $style = self::style(); }
+
+        $p = 'A realistic editorial photograph about ' . $kw . '.';
+        if ($style !== '') { $p .= ' Style: ' . $style . '.'; }
+        return $p . ' Natural lighting, candid documentary style, shot on 50mm, shallow depth '
+                  . 'of field, high detail, no text, no watermark, no logos, no collage.';
     }
 
     /**
      * Genereaza o imagine si o incarca in biblioteca media. Returneaza att_id sau WP_Error.
      * $keywords = cuvinte-cheie in engleza (deja traduse din titlu de HZ_Bulk).
      */
-    public static function sideload($keywords, $post_id, $title) {
+    public static function sideload($keywords, $post_id, $title, $style = '') {
         if (!self::has_key()) {
             return new WP_Error('hzig_key', 'Cheia OpenAI nu e configurată pentru generarea de imagini.');
         }
         $key    = CW_API::openai_key();
-        $prompt = self::build_prompt($keywords);
+        $prompt = self::build_prompt($keywords, $style);
 
         $payload = array(
             'model'   => self::model(),

@@ -18,6 +18,7 @@ if (!defined('ABSPATH')) { exit; }
  *   hz/v1/control  -> start | stop | retry | clear
  *   hz/v1/settings -> suprascrie chei API, cheia Magnific, modelul implicit, limitele
  *   hz/v1/costs    -> cheltuiala AI pe zi, defalcata pe modul si pe model
+ *   hz/v1/reimage  -> reface pozele articolelor deja publicate dintr-un lot (alt stil/sursa)
  */
 class HZ_Remote {
 
@@ -29,7 +30,7 @@ class HZ_Remote {
     }
 
     public function register() {
-        $routes = array('info', 'enqueue', 'status', 'control', 'settings', 'rewrite', 'golinks', 'trash', 'costs');
+        $routes = array('info', 'enqueue', 'status', 'control', 'settings', 'rewrite', 'golinks', 'trash', 'costs', 'reimage');
         foreach ($routes as $route) {
             register_rest_route('hz/v1', '/' . $route, array(
                 'methods'             => 'POST',
@@ -72,6 +73,31 @@ class HZ_Remote {
      * editor). Datele zilnice există doar de la v3.22.0 încoace — înainte nu se
      * înregistra cine cheltuie, doar cât.
      */
+    /**
+     * Reface pozele articolelor deja publicate dintr-un lot, cu alt stil/sursa.
+     * Body: { batch, style, source, after, max }. Se apeleaza REPETAT (dupa `after`)
+     * pana cand `done` = true.
+     */
+    public function handle_reimage(WP_REST_Request $req) {
+        $data = $this->auth($req);
+        if ($data instanceof WP_REST_Response) { return $data; }
+
+        $batch = isset($data['batch']) ? (string) $data['batch'] : '';
+        if ($batch === '') {
+            return new WP_REST_Response(array('error' => 'no_batch'), 400);
+        }
+
+        $bulk = new HZ_Bulk();
+        $res  = $bulk->reimage_batch($batch, array(
+            'style'  => isset($data['style']) ? (string) $data['style'] : '',
+            'source' => isset($data['source']) ? sanitize_key((string) $data['source']) : '',
+            'after'  => isset($data['after']) ? (int) $data['after'] : 0,
+            'max'    => isset($data['max']) ? (int) $data['max'] : 3,
+        ));
+
+        return array_merge(array('ok' => true), $res);
+    }
+
     public function handle_costs(WP_REST_Request $req) {
         $data = $this->auth($req);
         if ($data instanceof WP_REST_Response) { return $data; }
@@ -252,6 +278,8 @@ class HZ_Remote {
             'images' => isset($data['images']) ? $data['images'] : '',
             // Sursa imaginilor pentru lot: 'ai' = generare OpenAI, 'magnific' = stock. Gol = setarea site-ului.
             'img_source' => isset($data['img_source']) ? sanitize_key((string) $data['img_source']) : '',
+            // Stilul comun al imaginilor pentru lot (ex. „fotografii de mancare, vedere de sus").
+            'img_style'  => isset($data['img_style']) ? sanitize_textarea_field((string) $data['img_style']) : '',
             // Căutare web pentru lotul ăsta: absent = setarea site-ului.
             'web'    => isset($data['web']) ? $data['web'] : '',
             // Data de publicare pentru lotul ăsta: absent = setarea site-ului, 0 = azi, 1 = backdate.
@@ -367,7 +395,7 @@ class HZ_Remote {
             update_option('hzb_img_source', $set['img_source'], 'no');
             $changed[] = 'img_source';
         }
-        foreach (array('imagegen_model' => 'hz_imagegen_model', 'imagegen_size' => 'hz_imagegen_size', 'imagegen_quality' => 'hz_imagegen_quality') as $f => $opt) {
+        foreach (array('imagegen_model' => 'hz_imagegen_model', 'imagegen_size' => 'hz_imagegen_size', 'imagegen_quality' => 'hz_imagegen_quality', 'imagegen_style' => 'hz_imagegen_style') as $f => $opt) {
             if (isset($set[$f]) && trim((string) $set[$f]) !== '') {
                 update_option($opt, sanitize_text_field((string) $set[$f]), 'no');
                 $changed[] = $f;

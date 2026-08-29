@@ -207,6 +207,7 @@ class HZ_Bulk {
         $len    = isset($opts['length']) ? (int) $opts['length'] : 0;
         $img    = isset($opts['images']) && $opts['images'] !== '' ? max(0, min(self::MAX_IMAGES, (int) $opts['images'])) : null;
         $imgsrc = (isset($opts['img_source']) && in_array($opts['img_source'], array('magnific', 'ai'), true)) ? $opts['img_source'] : '';
+        $imgstyle = isset($opts['img_style']) ? mb_substr(trim((string) $opts['img_style']), 0, 500) : '';
         $mkcat  = !empty($opts['create_category']);
         // v3.16.0: 'review' = articol editorial cu produse (vezi HZ_Review). Orice
         // altceva = articolul obișnuit, pe șablonul editorial al site-ului.
@@ -289,6 +290,7 @@ class HZ_Bulk {
                 'len'     => $len > 0 ? max(300, $len) : 0,
                 'img'     => $img,
                 'imgsrc'  => $imgsrc,
+                'imgstyle'=> $imgstyle,
                 'web'     => $web,
                 'rd'      => $rd,
                 'lnk'     => array('total' => count($links), 'done' => 0, 'forced' => 0),
@@ -544,7 +546,7 @@ class HZ_Bulk {
 
             if ($filled >= $batch) { $left++; continue; }
 
-            $img = $this->fetch_images((string) $item['t'], (string) $item['model'], $images, (string) ($item['imgsrc'] ?? ''));
+            $img = $this->fetch_images((string) $item['t'], (string) $item['model'], $images, (string) ($item['imgsrc'] ?? ''), (string) ($item['imgstyle'] ?? ''));
             if (empty($img['ids'])) {
                 $note = $img['note'];
                 // Cotă terminată în timpul lotului: ne oprim, restul rămân pentru mâine.
@@ -880,7 +882,7 @@ class HZ_Bulk {
         // 2) Imaginile: interogare de căutare în engleză (stocul e indexat în
         // engleză), generată de model din titlu — apel minuscul, cost neglijabil.
         $images   = $this->images_for($item);
-        $img      = $this->fetch_images($title, $model, $images, (string) ($item['imgsrc'] ?? ''));
+        $img      = $this->fetch_images($title, $model, $images, (string) ($item['imgsrc'] ?? ''), (string) ($item['imgstyle'] ?? ''));
         $att_ids  = $img['ids'];
         $img_note = $img['note'];
         $cost    += $img['cost'];
@@ -1060,7 +1062,7 @@ class HZ_Bulk {
      * minuscul. Returnează array('ids', 'note', 'cost'); folosit și la generare, și
      * la completarea ulterioară a articolelor rămase fără poză.
      */
-    private function fetch_images($title, $model, $limit, $source = '') {
+    private function fetch_images($title, $model, $limit, $source = '', $style = '') {
         // `blocked` = n-avem DE UNDE lua poze (cotă/credite/cheie), spre deosebire de
         // „am căutat și n-am găsit". Doar primul caz oprește publicarea articolului.
         $out = array('ids' => array(), 'note' => '', 'cost' => 0.0, 'blocked' => false);
@@ -1095,7 +1097,7 @@ class HZ_Bulk {
         // --- Sursa AI: generam $limit imagini din cuvintele cheie ---
         if ($ai) {
             for ($k = 0; $k < $limit; $k++) {
-                $att = HZ_ImageGen::sideload($query, 0, $title);
+                $att = HZ_ImageGen::sideload($query, 0, $title, $style);
                 if (is_wp_error($att)) {
                     $out['note'] = $att->get_error_message();
                     $m = strtolower($out['note']);
@@ -1141,6 +1143,89 @@ class HZ_Bulk {
         if (empty($out['ids']) && $out['note'] === '') {
             $out['note'] = 'Nicio imagine de stock găsită pentru: ' . $query;
         }
+        return $out;
+    }
+
+    /**
+     * REFACE pozele articolelor deja publicate dintr-un lot, cu alt stil/sursa.
+     * Inlocuieste imaginea reprezentativa (coverul) si sterge vechea imagine daca
+     * era pusa de noi (Magnific sau AI) — ca sa nu umplem biblioteca media.
+     *
+     * Lucreaza in REPRIZE: $after = indexul de la care continuam (paginare stabila
+     * peste coada), cu buget de timp, ca panoul sa poata apela repetat.
+     *
+     * @return array ['processed','replaced','failed','after','done','note']
+     */
+    public function reimage_batch($batch, $opts = array()) {
+        $out = array('processed' => 0, 'replaced' => 0, 'failed' => 0, 'after' => 0, 'done' => true, 'note' => '');
+
+        $source = isset($opts['source']) && in_array($opts['source'], array('magnific', 'ai'), true) ? $opts['source'] : '';
+        $style  = isset($opts['style']) ? mb_substr(trim((string) $opts['style']), 0, 500) : '';
+        $after  = isset($opts['after']) ? max(0, (int) $opts['after']) : 0;
+        $max    = isset($opts['max']) ? max(1, min(10, (int) $opts['max'])) : 3;
+        $budget = 45; // secunde per reprize
+        $start  = time();
+
+        if (function_exists('set_time_limit')) { @set_time_limit(300); }
+
+        $q = $this->queue();
+        $n = count($q);
+        $i = $after;
+
+        for (; $i < $n; $i++) {
+            if ($out['processed'] >= $max) { break; }
+            if ((time() - $start) >= $budget) { break; }
+
+            $item = $q[$i];
+            if ($batch !== '' && (!isset($item['b']) || $item['b'] !== $batch)) { continue; }
+            if (($item['s'] ?? '') !== 'done' || empty($item['post_id'])) { continue; }
+            $pid = (int) $item['post_id'];
+            if (!get_post($pid)) { continue; }
+
+            $old = (int) get_post_thumbnail_id($pid);
+
+            $img = $this->fetch_images(
+                (string) $item['t'],
+                (string) $item['model'],
+                1,                                   // doar coverul
+                $source !== '' ? $source : (string) ($item['imgsrc'] ?? ''),
+                $style !== '' ? $style : (string) ($item['imgstyle'] ?? '')
+            );
+            $out['processed']++;
+
+            if (empty($img['ids'])) {
+                $out['failed']++;
+                $out['note'] = $img['note'];
+                if (!empty($img['blocked'])) { $i++; break; } // cota/cheie -> ne oprim curat
+                continue;
+            }
+
+            set_post_thumbnail($pid, (int) $img['ids'][0]);
+            wp_update_post(array('ID' => $pid, 'post_modified' => current_time('mysql')));
+
+            // Stergem vechea imagine DOAR daca era pusa de noi (stock Magnific sau AI).
+            if ($old > 0 && $old !== (int) $img['ids'][0]) {
+                $ours = get_post_meta($old, '_hzb_magnific_id', true) !== '' || get_post_meta($old, '_hz_imagegen', true) !== '';
+                if ($ours) { wp_delete_attachment($old, true); }
+            }
+
+            // Retinem stilul folosit pe item, ca o rulare viitoare sa stie cu ce s-a facut.
+            if ($style !== '') { $q[$i]['imgstyle'] = $style; }
+            if ($source !== '') { $q[$i]['imgsrc'] = $source; }
+            $out['replaced']++;
+        }
+
+        $this->save_queue($q);
+
+        // Mai exista articole de refacut dupa indexul curent?
+        $more = false;
+        for ($j = $i; $j < $n; $j++) {
+            $it = $q[$j];
+            if ($batch !== '' && (!isset($it['b']) || $it['b'] !== $batch)) { continue; }
+            if (($it['s'] ?? '') === 'done' && !empty($it['post_id'])) { $more = true; break; }
+        }
+        $out['after'] = $i;
+        $out['done']  = !$more;
         return $out;
     }
 
