@@ -59,11 +59,26 @@ class HZ_Bulk {
         update_option('hzb_queue', array_values($q), 'no');
     }
 
-    /** Programează procesarea imediat, dacă nu rulează deja ceva. */
+    /**
+     * Programează procesarea imediat, dacă nu rulează deja ceva.
+     *
+     * v3.30.2: dacă există DEJA o rulare programată, dar mult mai târziu, o mutăm în
+     * față. Altfel coada rămâne blocată ore în șir fără niciun semn: blocajul de
+     * imagini (cotă atinsă) își programează revenirea la 00:00 UTC, iar de acolo
+     * `wp_next_scheduled` întorcea mereu un timestamp „valid", deci Reîncearcă /
+     * Pornește / Deblochează chemau kick() degeaba — nu se mai programa nimic apropiat
+     * și panoul nici măcar nu avea ce avertisment să afișeze (next_run != 0).
+     */
     private function kick($delay = 1) {
         if ((int) get_option('hzb_stopped', 0)) { return; } // oprit de user
-        if (!wp_next_scheduled(self::HOOK)) {
-            wp_schedule_single_event(time() + max(1, (int) $delay), self::HOOK);
+        $when = time() + max(1, (int) $delay);
+        $next = wp_next_scheduled(self::HOOK);
+        if ($next && $next > $when + 60) {
+            wp_unschedule_event($next, self::HOOK);
+            $next = false;
+        }
+        if (!$next) {
+            wp_schedule_single_event($when, self::HOOK);
         }
         if (!get_transient(self::LOCK) && function_exists('spawn_cron')) {
             spawn_cron();
@@ -404,13 +419,22 @@ class HZ_Bulk {
             case 'retry':
                 $q = $this->queue();
                 $n = 0;
+                $pending = 0;
                 foreach ($q as &$item) {
                     if ($item['s'] === 'error') { $item['s'] = 'pending'; $item['err'] = ''; $n++; }
+                    if ($item['s'] === 'pending') { $pending++; }
                 }
                 unset($item);
                 $this->save_queue($q);
-                if ($n > 0) { $this->kick(); }
-                return sprintf('%d articole repuse în coadă.', $n);
+                // „Reîncearcă" e o comandă explicită de reluare: ridicăm și oprirea, și
+                // pauza automată (cotă de imagini), altfel kick() iese pe loc și userul
+                // vede butonul apăsat, dar coada nu pornește niciodată.
+                update_option('hzb_stopped', 0, 'no');
+                delete_option('hzb_paused_reason');
+                if ($pending > 0) { $this->kick(); }
+                return $pending > 0
+                    ? sprintf('%d articole repuse în coadă (%d de procesat).', $n, $pending)
+                    : 'Nimic de reluat: coada nu are articole cu eroare.';
             case 'clear':
                 $q = array();
                 foreach ($this->queue() as $item) {
@@ -689,7 +713,7 @@ class HZ_Bulk {
         // măcar nu se generează, ca să nu plătim un text pe care nu-l putem publica.
         $images = $this->images_for($q[$idx]);
         if ($images > 0) {
-            $block = self::images_blocked();
+            $block = self::images_blocked((string) ($q[$idx]['imgsrc'] ?? ''));
             if ($block !== null) {
                 update_option('hzb_paused_reason', $block['msg'], 'no');
                 delete_transient(self::LOCK);
@@ -1011,12 +1035,27 @@ class HZ_Bulk {
     }
 
     /**
-     * Poate livra Magnific o poză acum? null = da. Altfel array('msg', 'at'), unde
-     * `at` e momentul în care are rost să reîncercăm singuri (0 = nu se rezolvă de
-     * la sine). Un articol fără poză nu se publică, deci întrebarea se pune ÎNAINTE
+     * Poate livra sursa de imagini o poză acum? null = da. Altfel array('msg', 'at'),
+     * unde `at` e momentul în care are rost să reîncercăm singuri (0 = nu se rezolvă
+     * de la sine). Un articol fără poză nu se publică, deci întrebarea se pune ÎNAINTE
      * de generare — nu după ce am plătit textul.
+     *
+     * $source vine de pe item ('ai' = generare OpenAI, altfel stoc Magnific); gol =
+     * setarea site-ului. Fără el, un lot pe generare AI se bloca pe cota Magnific,
+     * care n-are nicio treabă cu el.
      */
-    public static function images_blocked() {
+    public static function images_blocked($source = '') {
+        $source = $source !== '' ? $source : (string) get_option('hzb_img_source', 'magnific');
+        if ($source === 'ai') {
+            if (!class_exists('HZ_ImageGen') || !HZ_ImageGen::has_key()) {
+                return array(
+                    'msg' => 'Nu e configurată cheia OpenAI, deci nu putem genera imagini cu AI și '
+                           . 'articolele ar ieși fără poze — coada așteaptă. Pune cheia în setări și pornește singură.',
+                    'at'  => 0,
+                );
+            }
+            return null;
+        }
         if (!HZ_Magnific::has_key()) {
             return array(
                 'msg' => 'Nu e configurată cheia API Magnific, deci articolele ar ieși fără poze — '
