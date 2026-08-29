@@ -54,6 +54,23 @@ class HZ_Links {
      * True dacă host-ul e un site OFICIAL al statului român (whitelist extensibilă prin
      * filtrul `hzb_official_ro_domains`). Orice subdomeniu `.gov.ro` e considerat oficial.
      */
+    /**
+     * Hostul propriu al site-ului (fara www). Un link catre PROPRIUL domeniu nu e
+     * niciodata o referinta externa: e link intern, pus fie de noi, fie de model
+     * (vezi promptul de nisa auto, care cere linkuri interne pe marci).
+     */
+    public static function own_host() {
+        $h = strtolower((string) parse_url(home_url('/'), PHP_URL_HOST));
+        return preg_replace('#^www\.#', '', $h);
+    }
+
+    /** True daca hostul e chiar site-ul curent. */
+    public static function is_own_host($host) {
+        $host = preg_replace('#^www\.#', '', strtolower(trim((string) $host)));
+        $own  = self::own_host();
+        return ($host !== '' && $own !== '' && $host === $own);
+    }
+
     public static function is_official_ro($host) {
         $host = strtolower(trim((string) $host));
         $host = preg_replace('#^www\.#', '', $host);
@@ -137,6 +154,8 @@ class HZ_Links {
             '#<a\b[^>]*\bhref\s*=\s*(["\'])(.*?)\1[^>]*>(.*?)</a>#is',
             function ($m) {
                 $host = strtolower((string) parse_url(html_entity_decode($m[2]), PHP_URL_HOST));
+                // Linkurile INTERNE (spre propriul domeniu) raman intacte.
+                if (self::is_own_host($host)) { return $m[0]; }
                 return self::is_official_ro($host) ? $m[0] : $m[3];
             },
             $content
@@ -150,6 +169,9 @@ class HZ_Links {
             '#\[([^\]]+)\]\((https?://[^)\s]+)\)#i',
             function ($m) {
                 $host = strtolower((string) parse_url($m[2], PHP_URL_HOST));
+                if (self::is_own_host($host)) {
+                    return '<a href="' . esc_url($m[2]) . '">' . $m[1] . '</a>';
+                }
                 if (!self::is_official_ro($host)) { return $m[1]; }
                 return '<a href="' . esc_url(self::clean_url($m[2])) . '" target="_blank" rel="nofollow noopener">'
                     . $m[1] . '</a>';
@@ -162,6 +184,7 @@ class HZ_Links {
             '#\bhttps?://[^\s<)"\']+#i',
             function ($m) {
                 $host = strtolower((string) parse_url($m[0], PHP_URL_HOST));
+                if (self::is_own_host($host)) { return $m[0]; }
                 return self::is_official_ro($host) ? $m[0] : '';
             },
             $content
@@ -175,7 +198,9 @@ class HZ_Links {
             $content = preg_replace_callback(
                 '#\b((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+ro)\b#i',
                 function ($m) {
-                    return self::is_official_ro(strtolower($m[1])) ? $m[0] : '';
+                    $h = strtolower($m[1]);
+                    if (self::is_own_host($h)) { return $m[0]; }
+                    return self::is_official_ro($h) ? $m[0] : '';
                 },
                 $content
             );
