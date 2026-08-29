@@ -689,42 +689,55 @@ class HZ_Bulk {
         update_option('hzb_lock_at', time(), 'no'); // v3.8.3: momentul lock-ului, pt auto-vindecare
         if (function_exists('set_time_limit')) { @set_time_limit(600); }
 
-        $q   = $this->queue();
-        $idx = null;
+        $q    = $this->queue();
+        $cand = array();
         foreach ($q as $i => $item) {
-            if ($item['s'] === 'pending') { $idx = $i; break; }
+            if ($item['s'] === 'pending') { $cand[] = $i; continue; }
             // v3.4.8: un item „working" se reia DOAR dacă e vechi. Înainte îl reluam
             // imediat, presupunând că rularea anterioară a murit — dar de cele mai
             // multe ori ea era doar în curs (generarea durează 1-3 minute), iar
             // reluarea producea încă un articol cu același titlu.
             $started = isset($item['started']) ? (int) $item['started'] : 0;
             if ($item['s'] === 'working' && (!$started || (time() - $started) > 20 * MINUTE_IN_SECONDS)) {
-                $idx = $i;
-                break;
+                $cand[] = $i;
             }
         }
-        if ($idx === null) {
+        if (!$cand) {
             delete_transient(self::LOCK);
             return;
         }
 
         // NU scriem articole fără poze. Dacă sursa de imagini nu poate livra (cotă
-        // atinsă, refuz al contului sau cheie lipsă), coada așteaptă — articolul nici
-        // măcar nu se generează, ca să nu plătim un text pe care nu-l putem publica.
-        $images = $this->images_for($q[$idx]);
-        if ($images > 0) {
-            $block = self::images_blocked((string) ($q[$idx]['imgsrc'] ?? ''));
-            if ($block !== null) {
-                update_option('hzb_paused_reason', $block['msg'], 'no');
-                delete_transient(self::LOCK);
-                // Cota se resetează singură la 00:00 UTC, deci ne reprogramăm exact
-                // atunci. Cheia lipsă NU se rezolvă de la sine: acolo coada stă până o
-                // pune userul (salvarea cheii repornește coada, vezi HZ_Admin).
-                if ($block['at'] && !wp_next_scheduled(self::HOOK)) {
-                    wp_schedule_single_event($block['at'], self::HOOK);
-                }
-                return;
+        // atinsă, refuz al contului sau cheie lipsă), articolul nici măcar nu se
+        // generează, ca să nu plătim un text pe care nu-l putem publica.
+        //
+        // v3.31.0: blocajul e PE SURSĂ, nu pe toată coada. Înainte ne uitam doar la
+        // primul item: dacă acela era pe stoc Magnific cu cota atinsă, stăteau și
+        // loturile pe generare AI din spatele lui, care n-aveau nicio treabă cu cota.
+        // Acum sărim itemii blocați și luăm primul care chiar poate fi scris; pauza
+        // rămâne doar dacă TOATE sunt blocate (cu cel mai apropiat moment de reluare).
+        $idx   = null;
+        $block = null;
+        foreach ($cand as $i) {
+            if ($this->images_for($q[$i]) < 1) { $idx = $i; break; }
+            $b = self::images_blocked((string) ($q[$i]['imgsrc'] ?? ''));
+            if ($b === null) { $idx = $i; break; }
+            // Reținem blocajul care se rezolvă cel mai devreme (0 = nu se rezolvă singur).
+            if ($block === null
+                || ($b['at'] && (!$block['at'] || $b['at'] < $block['at']))) {
+                $block = $b;
             }
+        }
+        if ($idx === null) {
+            update_option('hzb_paused_reason', $block['msg'], 'no');
+            delete_transient(self::LOCK);
+            // Cota se resetează singură la 00:00 UTC, deci ne reprogramăm exact
+            // atunci. Cheia lipsă NU se rezolvă de la sine: acolo coada stă până o
+            // pune userul (salvarea cheii repornește coada, vezi HZ_Admin).
+            if ($block['at'] && !wp_next_scheduled(self::HOOK)) {
+                wp_schedule_single_event($block['at'], self::HOOK);
+            }
+            return;
         }
         delete_option('hzb_paused_reason');
 
