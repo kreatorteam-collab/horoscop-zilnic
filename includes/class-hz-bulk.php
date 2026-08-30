@@ -371,6 +371,10 @@ class HZ_Bulk {
                 'title'       => (string) $item['t'],
                 'status'      => (string) $item['s'],
                 'post_id'     => $pid,
+                // Sursa de adevar pt „fara poza": are articolul imagine reprezentativa
+                // ACUM? Nota ramane cea scrisa la publicare, deci dupa o completare
+                // ulterioara de poze ar fi ramas marcat gresit pe veci.
+                'no_image'    => ((string) $item['s'] === 'done' && $pid && !has_post_thumbnail($pid)) ? 1 : 0,
                 'url'         => $pid ? get_permalink($pid) : '',
                 'edit_url'    => $pid ? get_edit_post_link($pid, 'raw') : '',
                 'error'       => (string) $item['err'],
@@ -406,7 +410,7 @@ class HZ_Bulk {
     }
 
     /** Comenzi din panoul central: start / stop / retry / clear (doar ce nu e în lucru). */
-    public function control($action) {
+    public function control($action, $batch = '') {
         switch ($action) {
             case 'start':
                 update_option('hzb_stopped', 0, 'no');
@@ -421,7 +425,10 @@ class HZ_Bulk {
                 $n = 0;
                 $pending = 0;
                 foreach ($q as &$item) {
-                    if ($item['s'] === 'error') { $item['s'] = 'pending'; $item['err'] = ''; $n++; }
+                    // Scopat pe lot cand ni se cere: reluam doar articolele cu problema
+                    // din lotul din care s-a apasat butonul.
+                    $inBatch = ($batch === '' || (isset($item['b']) && $item['b'] === $batch));
+                    if ($item['s'] === 'error' && $inBatch) { $item['s'] = 'pending'; $item['err'] = ''; $n++; }
                     if ($item['s'] === 'pending') { $pending++; }
                 }
                 unset($item);
@@ -1284,6 +1291,10 @@ class HZ_Bulk {
                 $ours = get_post_meta($old, '_hzb_magnific_id', true) !== '' || get_post_meta($old, '_hz_imagegen', true) !== '';
                 if ($ours) { wp_delete_attachment($old, true); }
             }
+
+            // Nota ramasese „Fara imagine: motiv" de la publicare — acum e neadevarata.
+            $nn = preg_replace('/F[aă]r[aă] imagine[^·]*/u', '1 imagine (completata ulterior)', (string) $item['note']);
+            $q[$i]['note'] = trim($nn) !== '' ? trim($nn) : '1 imagine (completata ulterior)';
 
             // Retinem stilul folosit pe item, ca o rulare viitoare sa stie cu ce s-a facut.
             if ($style !== '') { $q[$i]['imgstyle'] = $style; }

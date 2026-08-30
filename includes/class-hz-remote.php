@@ -656,8 +656,11 @@ class HZ_Remote {
         if (!in_array($action, array('start', 'stop', 'retry', 'clear', 'unlock'), true)) {
             return new WP_REST_Response(array('error' => 'bad_action'), 400);
         }
+        // Cu `batch` trimis, „retry" reia DOAR articolele cu eroare din lotul acela
+        // (altfel ar relua erorile tuturor loturilor de pe site).
+        $batch = isset($data['batch']) ? (string) $data['batch'] : '';
         $bulk = new HZ_Bulk();
-        return array('ok' => true, 'message' => $bulk->control($action));
+        return array('ok' => true, 'message' => $bulk->control($action, $batch));
     }
 
     /**
