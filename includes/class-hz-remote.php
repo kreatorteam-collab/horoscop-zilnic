@@ -94,6 +94,7 @@ class HZ_Remote {
             'after'  => isset($data['after']) ? (int) $data['after'] : 0,
             'max'    => isset($data['max']) ? (int) $data['max'] : 3,
             'only_with_image' => isset($data['only_with_image']) ? (int) $data['only_with_image'] : 1,
+            'mode'   => isset($data['mode']) ? sanitize_key((string) $data['mode']) : '',
         ));
 
         return array_merge(array('ok' => true), $res);

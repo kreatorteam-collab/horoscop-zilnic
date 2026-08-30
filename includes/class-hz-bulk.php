@@ -1209,13 +1209,20 @@ class HZ_Bulk {
      * @return array ['processed','replaced','failed','after','done','note']
      */
     public function reimage_batch($batch, $opts = array()) {
-        $out = array('processed' => 0, 'replaced' => 0, 'failed' => 0, 'skipped_no_image' => 0, 'after' => 0, 'done' => true, 'note' => '');
+        $out = array('processed' => 0, 'replaced' => 0, 'failed' => 0, 'skipped_no_image' => 0,
+                     'skipped_has_image' => 0, 'after' => 0, 'done' => true, 'note' => '');
 
         $source = isset($opts['source']) && in_array($opts['source'], array('magnific', 'ai'), true) ? $opts['source'] : '';
         $style  = isset($opts['style']) ? mb_substr(trim((string) $opts['style']), 0, 500) : '';
-        // Implicit REFACEM doar articolele care AU deja poza (asta inseamna „refa pozele").
-        // Cu only_with_image = 0 completam si articolele ramase fara poza.
-        $onlyWith = !isset($opts['only_with_image']) || (int) $opts['only_with_image'] === 1;
+        // Trei moduri de lucru:
+        //   'with'    (implicit) = REFACEM doar articolele care AU deja poza -> „Refa pozele"
+        //   'missing'            = COMPLETAM doar articolele ramase FARA poza (nu atingem restul)
+        //   'all'                = si una, si alta
+        // `only_with_image` ramane acceptat pentru compatibilitate cu apelurile vechi.
+        $mode = isset($opts['mode']) ? (string) $opts['mode'] : '';
+        if (!in_array($mode, array('with', 'missing', 'all'), true)) {
+            $mode = (isset($opts['only_with_image']) && (int) $opts['only_with_image'] === 0) ? 'all' : 'with';
+        }
         $after  = isset($opts['after']) ? max(0, (int) $opts['after']) : 0;
         $max    = isset($opts['max']) ? max(1, min(10, (int) $opts['max'])) : 3;
         $budget = 45; // secunde per reprize
@@ -1239,7 +1246,10 @@ class HZ_Bulk {
 
             $old = (int) get_post_thumbnail_id($pid);
             // „Refa pozele" = doar unde EXISTA deja o poza; cele fara raman neatinse.
-            if ($onlyWith && $old <= 0) { $out['skipped_no_image']++; continue; }
+            if ($mode === 'with' && $old <= 0) { $out['skipped_no_image']++; continue; }
+            // „Completeaza pozele lipsa" = exact invers, ca sa nu risipim bani (si sa nu
+            // stricam poze bune) pe articolele care au deja imagine.
+            if ($mode === 'missing' && $old > 0) { $out['skipped_has_image']++; continue; }
 
             $img = $this->fetch_images(
                 (string) $item['t'],
@@ -1280,7 +1290,9 @@ class HZ_Bulk {
             $it = $q[$j];
             if ($batch !== '' && (!isset($it['b']) || $it['b'] !== $batch)) { continue; }
             if (($it['s'] ?? '') !== 'done' || empty($it['post_id'])) { continue; }
-            if ($onlyWith && (int) get_post_thumbnail_id((int) $it['post_id']) <= 0) { continue; }
+            $thumb = (int) get_post_thumbnail_id((int) $it['post_id']);
+            if ($mode === 'with' && $thumb <= 0) { continue; }
+            if ($mode === 'missing' && $thumb > 0) { continue; }
             $more = true; break;
         }
         $out['after'] = $i;
