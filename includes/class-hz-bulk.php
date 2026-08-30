@@ -1210,7 +1210,8 @@ class HZ_Bulk {
      */
     public function reimage_batch($batch, $opts = array()) {
         $out = array('processed' => 0, 'replaced' => 0, 'failed' => 0, 'skipped_no_image' => 0,
-                     'skipped_has_image' => 0, 'after' => 0, 'done' => true, 'note' => '');
+                     'skipped_has_image' => 0, 'skipped_same_style' => 0,
+                     'after' => 0, 'done' => true, 'note' => '');
 
         $source = isset($opts['source']) && in_array($opts['source'], array('magnific', 'ai'), true) ? $opts['source'] : '';
         $style  = isset($opts['style']) ? mb_substr(trim((string) $opts['style']), 0, 500) : '';
@@ -1219,8 +1220,12 @@ class HZ_Bulk {
         //   'missing'            = COMPLETAM doar articolele ramase FARA poza (nu atingem restul)
         //   'all'                = si una, si alta
         // `only_with_image` ramane acceptat pentru compatibilitate cu apelurile vechi.
+        //   'restyle'            = doar articolele a caror poza a fost facuta cu ALT stil
+        //                            decat cel cerut acum (reparare ieftina, fara sa
+        //                            refacem tot lotul)
         $mode = isset($opts['mode']) ? (string) $opts['mode'] : '';
-        if (!in_array($mode, array('with', 'missing', 'all'), true)) {
+        if ($mode === 'restyle' && $style === '') { $mode = 'with'; }  // fara stil n-are ce compara
+        if (!in_array($mode, array('with', 'missing', 'all', 'restyle'), true)) {
             $mode = (isset($opts['only_with_image']) && (int) $opts['only_with_image'] === 0) ? 'all' : 'with';
         }
         $after  = isset($opts['after']) ? max(0, (int) $opts['after']) : 0;
@@ -1250,6 +1255,10 @@ class HZ_Bulk {
             // „Completeaza pozele lipsa" = exact invers, ca sa nu risipim bani (si sa nu
             // stricam poze bune) pe articolele care au deja imagine.
             if ($mode === 'missing' && $old > 0) { $out['skipped_has_image']++; continue; }
+            // Poza e deja facuta exact cu stilul cerut -> n-are rost s-o regeneram.
+            if ($mode === 'restyle' && $old > 0 && (string) ($item['imgstyle'] ?? '') === $style) {
+                $out['skipped_same_style']++; continue;
+            }
 
             $img = $this->fetch_images(
                 (string) $item['t'],
@@ -1293,6 +1302,7 @@ class HZ_Bulk {
             $thumb = (int) get_post_thumbnail_id((int) $it['post_id']);
             if ($mode === 'with' && $thumb <= 0) { continue; }
             if ($mode === 'missing' && $thumb > 0) { continue; }
+            if ($mode === 'restyle' && $thumb > 0 && (string) ($it['imgstyle'] ?? '') === $style) { continue; }
             $more = true; break;
         }
         $out['after'] = $i;
