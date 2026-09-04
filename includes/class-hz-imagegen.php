@@ -50,8 +50,33 @@ class HZ_ImageGen {
 
         $p = 'A realistic editorial photograph about ' . $kw . '.';
         if ($style !== '') { $p .= ' Style: ' . $style . '.'; }
+        $people = self::people_rule();
+        if ($people !== '') { $p .= ' ' . $people; }
         return $p . ' Natural lighting, candid documentary style, shot on 50mm, shallow depth '
                   . 'of field, high detail, no text, no watermark, no logos, no collage.';
+    }
+
+    /**
+     * Regula pentru persoanele din imagine, din aceeasi optiune ca filtrul de stock
+     * (hzb_people_ethnicity) — o singura setare guverneaza si stocul, si generarea AI.
+     * Gol = fara constrangere. Formulata conditionat: subiectele fara oameni raman
+     * fara oameni, nu fortam aparitia unei persoane in poza.
+     */
+    private static function people_rule() {
+        $eth = class_exists('HZ_Magnific') ? HZ_Magnific::ethnicity() : '';
+        $map = array(
+            'white'           => 'white European',
+            'black'           => 'Black',
+            'hispanic'        => 'Hispanic',
+            'indian'          => 'Indian',
+            'east-asian'      => 'East Asian',
+            'south-asian'     => 'South Asian',
+            'southeast-asian' => 'Southeast Asian',
+            'middle-eastern'  => 'Middle Eastern',
+            'multiracial'     => 'multiracial',
+        );
+        if ($eth === '' || !isset($map[$eth])) { return ''; }
+        return 'If any people are visible, they must be ' . $map[$eth] . '.';
     }
 
     /**

@@ -212,6 +212,8 @@ class HZ_Remote {
             'magnific_left'   => HZ_Magnific::has_key()
                 ? max(0, HZ_Magnific::daily_limit() - HZ_Magnific::account_downloads_today())
                 : 0,
+            // Etnia impusă persoanelor din poze, gol = fără filtru (stock + imagini AI).
+            'people_ethnicity'=> HZ_Magnific::ethnicity(),
             'categories'      => $cats,
             'default_category'=> (int) get_option('default_category', 1),
             'defaults'        => array(
@@ -397,6 +399,19 @@ class HZ_Remote {
             update_option('hzb_img_source', $set['img_source'], 'no');
             $changed[] = 'img_source';
         }
+        // Etnia persoanelor din fotografii: valoare din HZ_Magnific::ETHNICITIES,
+        // iar 'any'/'none'/gol = fără filtru (singurul câmp unde golul NU înseamnă
+        // „lasă neatins", ca să se poată și opri de la distanță).
+        if (isset($set['people_ethnicity'])) {
+            $eth = sanitize_key((string) $set['people_ethnicity']);
+            if ($eth === 'any' || $eth === 'none') { $eth = ''; }
+            if ($eth === '' || in_array($eth, HZ_Magnific::ETHNICITIES, true)) {
+                update_option('hzb_people_ethnicity', $eth, 'no');
+                $changed[] = 'people_ethnicity';
+            } else {
+                $skipped[] = 'people_ethnicity necunoscut: ' . $eth;
+            }
+        }
         foreach (array('imagegen_model' => 'hz_imagegen_model', 'imagegen_size' => 'hz_imagegen_size', 'imagegen_quality' => 'hz_imagegen_quality', 'imagegen_style' => 'hz_imagegen_style') as $f => $opt) {
             if (isset($set[$f]) && trim((string) $set[$f]) !== '') {
                 update_option($opt, sanitize_text_field((string) $set[$f]), 'no');
@@ -490,6 +505,7 @@ class HZ_Remote {
                 'magnific_key'   => HZ_Magnific::has_key(),
                 'magnific_hash'  => HZ_Magnific::key_hash(),
                 'magnific_limit' => HZ_Magnific::daily_limit(),
+                'people_ethnicity' => HZ_Magnific::ethnicity(),
             ),
         );
     }

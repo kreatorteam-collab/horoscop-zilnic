@@ -103,6 +103,7 @@ class HZ_Admin {
             'hzb_length'       => 'absint',
             'hzb_author'       => 'absint',
             'hzb_ai_excluded'  => 'absint',
+            'hzb_people_ethnicity' => 'sanitize_key',
             'hzb_random_date'  => 'absint',
         );
         foreach ($bopts as $name => $cb) {
@@ -681,6 +682,17 @@ class HZ_Admin {
                         <td>
                             <input type="hidden" name="hzb_ai_excluded" value="0" />
                             <label><input type="checkbox" name="hzb_ai_excluded" value="1" <?php checked(1, (int) get_option('hzb_ai_excluded', 1)); ?> /> <?php esc_html_e('Exclude imaginile generate cu AI din rezultatele de stock (recomandat)', 'horoscop-zilnic'); ?></label>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><?php esc_html_e('Persoanele din poze', 'horoscop-zilnic'); ?></th>
+                        <td>
+                            <?php $hzb_eth = (string) get_option('hzb_people_ethnicity', 'white'); ?>
+                            <select name="hzb_people_ethnicity" id="hzb_people_ethnicity">
+                                <option value="white" <?php selected($hzb_eth, 'white'); ?>><?php esc_html_e('Doar persoane europene (albe)', 'horoscop-zilnic'); ?></option>
+                                <option value="" <?php selected($hzb_eth, ''); ?>><?php esc_html_e('Fără filtru', 'horoscop-zilnic'); ?></option>
+                            </select>
+                            <p class="description"><?php esc_html_e('Se aplică și la stocul Magnific, și la imaginile generate cu AI. Dacă subiectul n-are fotografii potrivite cu persoane, se caută fotografii fără persoane și abia la final una nefiltrată — ca articolul să nu rămână fără poză.', 'horoscop-zilnic'); ?></p>
                         </td>
                     </tr>
                     <tr>

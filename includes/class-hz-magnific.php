@@ -211,15 +211,33 @@ class HZ_Magnific {
     /* ---- Căutare ---- */
 
     /**
+     * Etnia impusă persoanelor din fotografii (gol = fără filtru). Valorile sunt cele
+     * acceptate de API-ul Magnific; pe flotă rulăm 'white' = persoane europene.
+     */
+    const ETHNICITIES = array('white', 'black', 'hispanic', 'indian', 'east-asian', 'south-asian', 'southeast-asian', 'middle-eastern', 'multiracial');
+
+    public static function ethnicity() {
+        $e = trim((string) get_option('hzb_people_ethnicity', 'white'));
+        return in_array($e, self::ETHNICITIES, true) ? $e : '';
+    }
+
+    /**
      * Caută fotografii de stock. Returnează array de resurse (id, title, preview)
      * sau WP_Error. Interogarea trebuie să fie în engleză pentru rezultate bune.
+     *
+     * Cu filtrul de etnie pornit căutarea merge pe TREPTE, ca articolul să nu rămână
+     * fără poză: (1) fotografii cu persoane de etnia cerută; (2) dacă nu există,
+     * fotografii FĂRĂ persoane (peisaje, obiecte, mâncare — majoritatea subiectelor,
+     * unde filtrul de persoane ar da zero rezultate); (3) abia la final căutarea
+     * nefiltrată. Deci ori persoanele din poză sunt cele cerute, ori poza n-are
+     * persoane deloc.
      */
     public static function search($term, $limit = 10) {
         if (!self::has_key()) {
             return new WP_Error('hzb_no_key', 'Cheia API Magnific nu este configurată.');
         }
 
-        $args = array(
+        $base = array(
             'term'  => $term,
             'limit' => max(1, min(50, (int) $limit)),
             'order' => 'relevance',
@@ -227,18 +245,37 @@ class HZ_Magnific {
             'filters[orientation][landscape]'  => 1,
         );
         if ((int) get_option('hzb_ai_excluded', 1)) {
-            $args['filters[ai-generated][excluded]'] = 1;
+            $base['filters[ai-generated][excluded]'] = 1;
         }
 
-        $results = self::do_search($args);
-        if (is_wp_error($results)) { return $results; }
-
-        // Zero rezultate cu filtrul de orientare: mai încercăm o dată fără el.
-        if (empty($results)) {
-            unset($args['filters[orientation][landscape]']);
-            $results = self::do_search($args);
+        $steps = array();
+        $eth   = self::ethnicity();
+        if ($eth !== '') {
+            $steps[] = array('filters[people][ethnicity]' => $eth);
+            $steps[] = array('filters[people][exclude]'   => 1);
         }
-        return $results;
+        $steps[] = array(); // fără filtru de persoane
+
+        foreach ($steps as $extra) {
+            $results = self::do_search(array_merge($base, $extra));
+            if (is_wp_error($results)) {
+                // Dacă API-ul refuză filtrul de persoane (dacă își schimbă numele sau
+                // valorile), nu pierdem poza: trecem la treapta următoare. Eroarea de
+                // pe treapta nefiltrată e reală și se raportează mai departe.
+                if (!empty($extra)) { continue; }
+                return $results;
+            }
+            if (!empty($results)) { return $results; }
+        }
+
+        // Zero rezultate pe toate treptele: mai încercăm o dată fără filtrul de
+        // orientare, pe aceleași trepte (păstrăm preferința pentru persoane).
+        unset($base['filters[orientation][landscape]']);
+        foreach ($steps as $extra) {
+            $results = self::do_search(array_merge($base, $extra));
+            if (!is_wp_error($results) && !empty($results)) { return $results; }
+        }
+        return array();
     }
 
     private static function do_search($args) {
