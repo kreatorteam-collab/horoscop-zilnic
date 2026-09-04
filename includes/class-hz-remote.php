@@ -214,6 +214,8 @@ class HZ_Remote {
                 : 0,
             // Etnia impusă persoanelor din poze, gol = fără filtru (stock + imagini AI).
             'people_ethnicity'=> HZ_Magnific::ethnicity(),
+            // Ultima rotire automata de cheie Magnific (gol = n-a fost nevoie).
+            'magnific_rotated'=> HZ_Magnific::last_rotation(),
             'categories'      => $cats,
             'default_category'=> (int) get_option('default_category', 1),
             'defaults'        => array(

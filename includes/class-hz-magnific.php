@@ -13,6 +13,8 @@ class HZ_Magnific {
     const API_BASE = 'https://api.magnific.com';
     // Contor CENTRAL agregat pe cheie (mai multe site-uri = aceeași cheie = un cont ~100/zi).
     const QUOTA_URL = 'https://app.targetseo.ro/api/magnific-usage.php';
+    // Pool-ul de chei: urmatoarea cheie neepuizata, semnat cu secretul de deploy al site-ului.
+    const KEY_NEXT_URL = 'https://app.targetseo.ro/api/magnific-key-next.php';
 
     /** Cheia API (stocată criptat, la fel ca și cheile AI). */
     public static function api_key() {
@@ -208,6 +210,99 @@ class HZ_Magnific {
         return (new DateTimeImmutable('tomorrow 00:10', new DateTimeZone('UTC')))->getTimestamp();
     }
 
+    /* ---- Rotirea cheilor (pool central) ----
+     * Cota Magnific e ~100 descarcari/zi PE CONT, deci o cheie noua din ACELASI cont
+     * n-ar aduce cota in plus. Panoul tine un pool de chei (conturi diferite) si, cand
+     * cea curenta e refuzata, ne da urmatoarea care mai are cota azi. Cheile nu se
+     * imprastie prin cele 77 de baze de date: le cerem la nevoie, semnat. */
+
+    /** Cheile incercate AZI pe site-ul asta, ca sa nu ne intoarcem la una epuizata. */
+    private static function tried_today() {
+        $t = get_option('hzb_keys_tried', array());
+        if (!is_array($t) || !isset($t['date']) || $t['date'] !== gmdate('Y-m-d') || !isset($t['h']) || !is_array($t['h'])) {
+            return array();
+        }
+        return array_values(array_filter(array_map('strval', $t['h'])));
+    }
+
+    private static function mark_tried($hash) {
+        if ($hash === '') { return; }
+        $h = self::tried_today();
+        if (in_array($hash, $h, true)) { return; }
+        $h[] = $hash;
+        update_option('hzb_keys_tried', array('date' => gmdate('Y-m-d'), 'h' => $h), 'no');
+    }
+
+    /** Ultima rotire automata (pentru hz/v1/info si pagina de setari). */
+    public static function last_rotation() {
+        $r = get_option('hzb_key_rotated', array());
+        return is_array($r) ? $r : array();
+    }
+
+    /**
+     * Cere panoului urmatoarea cheie neepuizata si o instaleaza pe site.
+     * Returneaza true DOAR daca a intrat o cheie noua (alt hash).
+     *
+     * Semnatura e cu `magpress_deploy_secret` - acelasi secret cu care panoul comanda
+     * site-ul; fara tema Magpress (secret absent) rotirea pur si simplu nu exista si
+     * ramane comportamentul vechi: asteptam resetul de la 00:00 UTC.
+     */
+    public static function rotate_key() {
+        $secret = (string) get_option('magpress_deploy_secret', '');
+        if (strlen($secret) < 32) { return false; }
+        // Un singur apel la cateva minute: la 77 de site-uri care lovesc cota in
+        // aceeasi ora, un tick ratacit n-are voie sa ceara chei in rafala.
+        if (get_transient('hzb_rotate_lock')) { return false; }
+        set_transient('hzb_rotate_lock', 1, 3 * MINUTE_IN_SECONDS);
+
+        $cur = self::key_hash();
+        if ($cur !== '') { self::mark_tried($cur); }
+
+        $body = wp_json_encode(array(
+            'site'  => home_url(),
+            'ts'    => time(),
+            'cur'   => $cur,
+            'tried' => self::tried_today(),
+        ));
+        $resp = wp_remote_post(self::KEY_NEXT_URL, array(
+            'timeout' => 15,
+            'headers' => array(
+                'Content-Type'         => 'application/json',
+                'X-Magpress-Signature' => hash_hmac('sha256', $body, $secret),
+            ),
+            'body'    => $body,
+        ));
+        if (is_wp_error($resp) || wp_remote_retrieve_response_code($resp) !== 200) { return false; }
+        $j = json_decode((string) wp_remote_retrieve_body($resp), true);
+        if (!is_array($j) || empty($j['ok']) || empty($j['key'])) { return false; }
+
+        $new = trim((string) $j['key']);
+        if ($new === '' || hash('sha256', 'mgq1|' . $new) === $cur) { return false; }
+
+        // update_option trece prin filtrul `pre_update_option_hzb_magnific_key`, deci
+        // cheia ajunge in DB criptata, la fel ca atunci cand o pui din setari.
+        update_option('hzb_magnific_key', $new);
+        self::reset_daily_state();          // cheie noua = contor si blocaj de la zero
+        self::mark_tried(hash('sha256', 'mgq1|' . $new));
+        update_option('hzb_key_rotated', array(
+            'at'    => time(),
+            'label' => isset($j['label']) ? (string) $j['label'] : '',
+            'used'  => isset($j['used']) ? (int) $j['used'] : 0,
+        ), 'no');
+        return true;
+    }
+
+    /**
+     * True daca avem o cheie cu cota azi. Daca cea curenta e epuizata, incearca
+     * automat urmatoarea din pool. False = chiar s-au terminat toate.
+     */
+    public static function ensure_usable_key() {
+        if (!self::has_key()) { return false; }
+        if (!self::limit_reached()) { return true; }
+        if (!self::rotate_key()) { return false; }
+        return !self::limit_reached();
+    }
+
     /* ---- Căutare ---- */
 
     /**
@@ -310,12 +405,14 @@ class HZ_Magnific {
      * Descarcă resursa în Media Library. Returnează attachment ID sau WP_Error.
      * Numără descărcarea în limita zilnică DOAR dacă apelul de download a reușit.
      */
-    public static function sideload($resource_id, $post_id, $title) {
+    public static function sideload($resource_id, $post_id, $title, $rotated = false) {
         if (!self::has_key()) {
             return new WP_Error('hzb_no_key', 'Cheia API Magnific nu este configurată.');
         }
-        if (self::limit_reached()) {
-            return new WP_Error('hzb_limit', 'Limita zilnică de descărcări Magnific a fost atinsă.');
+        // Nu ne mai oprim la prima cheie epuizata: ensure_usable_key() roteste singur
+        // pe urmatoarea din pool. Eroarea apare doar cand s-au terminat toate.
+        if (!self::ensure_usable_key()) {
+            return new WP_Error('hzb_limit', 'Limita zilnică de descărcări Magnific a fost atinsă pe toate cheile din pool.');
         }
 
         $size = get_option('hzb_image_size', 'large');
@@ -334,6 +431,11 @@ class HZ_Magnific {
             // azi (contorul local nu vede alte site-uri care folosesc aceeași cheie).
             if (stripos($msg, 'insufficient credits') !== false) {
                 self::mark_exhausted();
+                // Pool-ul are chei de pe CONTURI diferite: rotim pe urmatoarea si
+                // reincercam O SINGURA data exact aceeasi descarcare.
+                if (!$rotated && self::rotate_key()) {
+                    return self::sideload($resource_id, $post_id, $title, true);
+                }
                 // Limita de ~100/zi e pe CONT, nu pe cheie: chei noi generate în
                 // același cont trag din aceeași cotă și vor primi același refuz.
                 return new WP_Error('hzb_credits', 'Cota de descărcări de stock a contului Magnific e epuizată azi (limita e pe CONT, nu pe cheie - o cheie nouă din același cont nu adaugă cotă).');

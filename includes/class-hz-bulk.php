@@ -555,9 +555,9 @@ class HZ_Bulk {
         if (!HZ_Magnific::has_key()) {
             wp_send_json_error(array('message' => 'Pune întâi cheia API Magnific în setările de mai jos.'));
         }
-        if (HZ_Magnific::limit_reached()) {
+        if (!HZ_Magnific::ensure_usable_key()) {
             wp_send_json_error(array('message' => sprintf(
-                'Cota de descărcări Magnific e epuizată azi. Încearcă după %s.',
+                'Cota de descărcări Magnific e epuizată azi pe toate cheile din pool. Încearcă după %s.',
                 wp_date('d.m H:i', HZ_Magnific::next_reset_ts())
             )));
         }
@@ -1083,14 +1083,16 @@ class HZ_Bulk {
                 'at'  => 0,
             );
         }
-        if (HZ_Magnific::limit_reached()) {
+        // ensure_usable_key() roteste singur pe alta cheie din pool daca cea
+        // curenta e epuizata; coada se opreste doar cand s-au terminat toate.
+        if (!HZ_Magnific::ensure_usable_key()) {
             // Cota Magnific se resetează la 00:00 UTC — reluăm exact atunci, nu la
             // miezul nopții local (în România ar însemna 2-3 ore de așteptare inutilă
             // sau, invers, o repornire prea devreme care lovește iar refuzul).
             $t = HZ_Magnific::next_reset_ts();
             return array(
                 'msg' => sprintf(
-                    'Cota zilnică de descărcări Magnific e atinsă — nu scriem articole fără poze. '
+                    'Cota zilnică de descărcări Magnific e atinsă pe toate cheile din pool — nu scriem articole fără poze. '
                     . 'Coada continuă singură la %s (resetul e la 00:00 UTC).',
                     wp_date('d.m.Y H:i', $t)
                 ),
