@@ -65,3 +65,12 @@
     flex-wrap: wrap;
     gap: 6px;
 }
+
+/* Poza cu AI */
+.cw-img { margin-top: 14px; padding-top: 12px; border-top: 1px solid #dcdcde; }
+.cw-img-h { margin: 0 0 6px; font-weight: 600; }
+.cw-hint { margin: 4px 0 0; color: #646970; font-size: 12px; }
+.cw-check { display: block; margin: 6px 0 0; font-size: 12px; color: #3c434a; }
+.cw-check input { margin-right: 4px; }
+.cw-img-out { margin-top: 10px; }
+.cw-img-out img { max-width: 100%; height: auto; border: 1px solid #dcdcde; border-radius: 3px; display: block; }

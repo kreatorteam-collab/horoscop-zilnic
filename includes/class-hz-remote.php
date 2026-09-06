@@ -158,6 +158,9 @@ class HZ_Remote {
             // site-urile rămase pe o versiune veche modul lipsește, iar lotul ar fi
             // scris ca articol obișnuit, fără structura pe criterii.
             'review_mode'     => class_exists('HZ_Review'),
+            // v3.39.0: cate sabloane de stil a luat site-ul din platforma (0 = nu a
+            // ajuns la endpoint sau lista e goala) - se vede in panoul „Poza cu AI".
+            'imagegen_presets' => class_exists('HZ_ImageGen') ? count(HZ_ImageGen::presets()) : 0,
             // Câte linkuri de afiliere are site-ul în redirector (0 = niciunul, deci
             // articolele cu produse ar duce în gol).
             'go_links'        => class_exists('HZ_GoLinks') ? count(HZ_GoLinks::map()) : 0,
@@ -414,7 +417,7 @@ class HZ_Remote {
                 $skipped[] = 'people_ethnicity necunoscut: ' . $eth;
             }
         }
-        foreach (array('imagegen_model' => 'hz_imagegen_model', 'imagegen_size' => 'hz_imagegen_size', 'imagegen_quality' => 'hz_imagegen_quality', 'imagegen_style' => 'hz_imagegen_style') as $f => $opt) {
+        foreach (array('imagegen_model' => 'hz_imagegen_model', 'imagegen_size' => 'hz_imagegen_size', 'imagegen_quality' => 'hz_imagegen_quality', 'imagegen_style' => 'hz_imagegen_style', 'imagegen_format' => 'hz_imagegen_format', 'imagegen_compression' => 'hz_imagegen_compression', 'img_subsizes_webp' => 'hz_img_subsizes_webp', 'img_webp_quality' => 'hz_img_webp_quality') as $f => $opt) {
             if (isset($set[$f]) && trim((string) $set[$f]) !== '') {
                 update_option($opt, sanitize_text_field((string) $set[$f]), 'no');
                 $changed[] = $f;

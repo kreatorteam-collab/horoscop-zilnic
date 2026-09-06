@@ -9,6 +9,51 @@ if (!defined('ABSPATH')) { exit; }
 class HZ_ImageGen {
 
     const ENDPOINT = 'https://api.openai.com/v1/images/generations';
+    /** Sabloanele de stil se editeaza in platforma, nu pe fiecare site. */
+    const PRESETS_URL = 'https://app.targetseo.ro/api/imagegen-presets.php';
+
+    /**
+     * Sabloanele de stil din platforma (eticheta => prompt de stil), tinute in
+     * transient 6 ore. Semnatura e cu `magpress_deploy_secret`, acelasi secret cu
+     * care panoul comanda scrierea. Fara secret sau fara raspuns bun intoarce array gol
+     * — panoul din editor ramane utilizabil, doar fara dropdown de sabloane.
+     */
+    public static function presets($force = false) {
+        $cached = get_transient('hz_imagegen_presets');
+        if (!$force && is_array($cached)) { return $cached; }
+
+        $secret = (string) get_option('magpress_deploy_secret', '');
+        if ($secret === '') { return array(); }
+
+        $body = wp_json_encode(array('site' => home_url('/'), 'ts' => time()));
+        $resp = wp_remote_post(self::PRESETS_URL, array(
+            'headers' => array('Content-Type' => 'application/json',
+                               'X-Magpress-Signature' => hash_hmac('sha256', $body, $secret)),
+            'body'    => $body,
+            'timeout' => 15,
+        ));
+        // Esecul se tine minte 15 minute: altfel, cu platforma picata, FIECARE
+        // deschidere de articol ar astepta 15 secunde dupa o lista care nu vine.
+        if (is_wp_error($resp) || (int) wp_remote_retrieve_response_code($resp) !== 200) { return self::presets_fail(); }
+        $j = json_decode(wp_remote_retrieve_body($resp), true);
+        if (!is_array($j) || empty($j['presets']) || !is_array($j['presets'])) { return self::presets_fail(); }
+
+        $out = array();
+        foreach ($j['presets'] as $label => $style) {
+            $label = trim((string) $label); $style = trim((string) $style);
+            if ($label === '' || $style === '') { continue; }
+            $out[$label] = $style;
+            if (count($out) >= 50) { break; }
+        }
+        set_transient('hz_imagegen_presets', $out, 6 * HOUR_IN_SECONDS);
+        return $out;
+    }
+
+    /** Lista goala, retinuta scurt, ca sa nu batem endpointul la fiecare pagina. */
+    private static function presets_fail() {
+        set_transient('hz_imagegen_presets', array(), 15 * MINUTE_IN_SECONDS);
+        return array();
+    }
 
     public static function has_key() {
         return class_exists('CW_API') && CW_API::openai_key() !== '';
@@ -31,6 +76,72 @@ class HZ_ImageGen {
         $allowed = array('low', 'medium', 'high');
         $q = (string) get_option('hz_imagegen_quality', 'medium');
         return in_array($q, $allowed, true) ? $q : 'medium';
+    }
+
+    /**
+     * Formatul in care SALVAM imaginea (OpenAI o trimite PNG). Implicit jpeg:
+     * un PNG de 1536x1024 are 2-3 MB, iar WP genereaza si toate marimile derivate
+     * tot in PNG — cateva MB per articol, degeaba. Setabil remote (hz/v1/settings
+     * `imagegen_format`), 'png' = pastreaza originalul.
+     */
+    public static function format() {
+        $allowed = array('jpeg', 'webp', 'png');
+        $f = strtolower(trim((string) get_option('hz_imagegen_format', 'jpeg')));
+        return in_array($f, $allowed, true) ? $f : 'jpeg';
+    }
+
+    /** Calitatea de compresie la conversie (0-100). */
+    public static function compression() {
+        $q = (int) get_option('hz_imagegen_compression', 82);
+        return ($q >= 40 && $q <= 100) ? $q : 82;
+    }
+
+    /**
+     * Miniaturile in WebP (originalul ramane JPEG). Originalul e ce citeste Facebook
+     * din og:image, deci il lasam in pace; greutatea paginii vine oricum din marimea
+     * afisata in articol, care e o miniatura. Masurat pe o poza de 1536x1024:
+     * hero 1280 JPEG q82 = 163 KB, WebP q75 = 82 KB.
+     */
+    public static function subsizes_webp() {
+        return get_option('hz_img_subsizes_webp', '') === '1';
+    }
+
+    public static function webp_quality() {
+        $q = (int) get_option('hz_img_webp_quality', 75);
+        return ($q >= 40 && $q <= 100) ? $q : 75;
+    }
+
+    /** Suntem in mijlocul generarii miniaturilor? Doar atunci schimbam formatul. */
+    private static $in_subsizes = false;
+
+    /** Se cheama la plugins_loaded; fara optiune activa nu inregistreaza nimic. */
+    public static function boot() {
+        if (!self::subsizes_webp()) { return; }
+        add_filter('image_editor_output_format', array(__CLASS__, 'filter_output_format'));
+        add_filter('wp_editor_set_quality', array(__CLASS__, 'filter_quality'), 10, 2);
+        // Fereastra in care se fac miniaturile. Fara ea, filtrul prinde si salvarea
+        // ORIGINALULUI, iar og:image (ce citeste Facebook) ajunge WebP.
+        add_filter('intermediate_image_sizes_advanced', array(__CLASS__, 'subsizes_start'), 5);
+        add_filter('wp_generate_attachment_metadata', array(__CLASS__, 'subsizes_end'), 999);
+    }
+
+    public static function subsizes_start($sizes) { self::$in_subsizes = true;  return $sizes; }
+    public static function subsizes_end($meta)    { self::$in_subsizes = false; return $meta; }
+
+    public static function filter_output_format($formats) {
+        if (!self::$in_subsizes) { return $formats; }
+        if (!is_array($formats)) { $formats = array(); }
+        $formats['image/jpeg'] = 'image/webp';
+        $formats['image/png']  = 'image/webp';
+        return $formats;
+    }
+
+    /**
+     * WP reseteaza calitatea cand salveaza in alt format decat sursa (cheama
+     * set_quality() fara argument), deci valoarea pentru WebP se impune de aici.
+     */
+    public static function filter_quality($quality, $mime = '') {
+        return ($mime === 'image/webp') ? self::webp_quality() : $quality;
     }
 
     /** Stilul de imagine al site-ului (gol = fara stil impus). Setabil remote. */
@@ -146,14 +257,39 @@ class HZ_ImageGen {
         if (!$tmp || @file_put_contents($tmp, $bytes) === false) {
             return new WP_Error('hzig_tmp', 'Generare imagine: nu am putut scrie fișierul temporar.');
         }
-        $filename = sanitize_file_name('ai-' . substr(md5($title . microtime()), 0, 10) . '.png');
-        $att_id = media_handle_sideload(array('name' => $filename, 'tmp_name' => $tmp), $post_id, $title);
-        if (is_wp_error($att_id)) { @unlink($tmp); return $att_id; }
+        $file   = self::convert($tmp, $title);
+        $att_id = media_handle_sideload(array('name' => $file['name'], 'tmp_name' => $file['path']), $post_id, $title);
+        if (is_wp_error($att_id)) { @unlink($file['path']); return $att_id; }
 
         // Alt GOL, ca la pozele de stock (imagine decorativa) — coerent cu regula existenta.
         update_post_meta($att_id, '_wp_attachment_image_alt', '');
         update_post_meta($att_id, '_hz_imagegen', 1);
         return (int) $att_id;
+    }
+
+    /**
+     * Converteste PNG-ul primit de la OpenAI in formatul de salvare, INAINTE de
+     * sideload — asa ies usoare si miniaturile, nu doar originalul. Daca editorul
+     * de imagini lipseste sau da eroare, ramanem pe PNG: poza conteaza mai mult
+     * decat kilobaitii. Returneaza array('path' => fisier temporar, 'name' => nume final).
+     */
+    private static function convert($tmp, $title) {
+        $base = sanitize_file_name('ai-' . substr(md5($title . microtime()), 0, 10));
+        $png  = array('path' => $tmp, 'name' => $base . '.png');
+        $fmt  = self::format();
+        if ($fmt === 'png') { return $png; }
+
+        $editor = wp_get_image_editor($tmp);
+        if (is_wp_error($editor)) { return $png; }
+        $editor->set_quality(self::compression());
+
+        $ext   = ($fmt === 'webp') ? 'webp' : 'jpg';
+        $mime  = ($fmt === 'webp') ? 'image/webp' : 'image/jpeg';
+        $saved = $editor->save($tmp . '.' . $ext, $mime);
+        if (is_wp_error($saved) || empty($saved['path']) || !file_exists($saved['path'])) { return $png; }
+
+        @unlink($tmp);
+        return array('path' => (string) $saved['path'], 'name' => $base . '.' . $ext);
     }
 
     /** Cost aproximativ per imagine (USD), dupa model/marime (pt contorul lunar). */

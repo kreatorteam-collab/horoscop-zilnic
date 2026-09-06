@@ -335,6 +335,59 @@
         $status = $('#cw-status');
         $output = $('#cw-output');
 
+        // --- poza cu AI ---
+        var lastImg = null;
+        var $preset = $('#cw-img-preset'), $style = $('#cw-img-style');
+
+        function syncStyle() {
+            var st = $preset.find('option:selected').data('style');
+            $style.val(st ? String(st) : '');
+        }
+        if ($preset.length) { syncStyle(); $preset.on('change', syncStyle); }
+
+        $('#cw-img-gen').on('click', function () {
+            if (!CW.imgReady) { return; }
+            var $b = $(this);
+            setStatus(CW.i18n.imgWorking, '');
+            $('.cw-img-btn').prop('disabled', true);
+            cwHeartbeat(true);
+            $.post(CW.ajaxUrl, {
+                action: 'cw_image',
+                nonce: CW.nonce,
+                post_id: (window.CW_POST_ID || $('#post_ID').val() || 0),
+                subject: $('#cw-img-subject').val(),
+                style: $style.val(),
+                title: getPostTitle(),
+                feat: $('#cw-img-feat').is(':checked') ? '1' : '0'
+            }).done(function (r) {
+                cwHeartbeat(false);
+                $('.cw-img-btn').prop('disabled', false);
+                if (!r || !r.success) {
+                    setStatus((r && r.data && r.data.message) ? r.data.message : CW.i18n.error, 'err');
+                    return;
+                }
+                lastImg = r.data;
+                $('#cw-img-prev').attr('src', r.data.thumb || r.data.url);
+                $('#cw-img-out').show();
+                setStatus(CW.i18n.imgDone + (r.data.feat ? ' ' + CW.i18n.imgFeat : ''), 'ok');
+                // Gutenberg nu afla singur ca s-a pus imaginea reprezentativa
+                if (r.data.feat && window.wp && wp.data && wp.data.dispatch('core/editor')) {
+                    try { wp.data.dispatch('core/editor').editPost({ featured_media: r.data.id }); } catch (e) {}
+                }
+            }).fail(function () {
+                cwHeartbeat(false);
+                $('.cw-img-btn').prop('disabled', false);
+                setStatus(CW.i18n.error, 'err');
+            });
+        });
+
+        $('#cw-img-insert').on('click', function () {
+            if (!lastImg) { setStatus(CW.i18n.imgNone, 'err'); return; }
+            insertContent('<figure class="wp-block-image size-large"><img src="' + lastImg.url +
+                          '" alt="" class="wp-image-' + lastImg.id + '"/></figure>');
+            setStatus(CW.i18n.imgIns, 'ok');
+        });
+
         $('.cw-btn').on('click', function () {
             if (!CW.hasKey) { setStatus(CW.i18n.noKey, 'err'); return; }
             currentAction = $(this).data('action');
