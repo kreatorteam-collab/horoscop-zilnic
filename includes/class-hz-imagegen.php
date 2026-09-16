@@ -187,7 +187,8 @@ class HZ_ImageGen {
             'multiracial'     => 'multiracial',
         );
         if ($eth === '' || !isset($map[$eth])) { return ''; }
-        return 'If any people are visible, they must be ' . $map[$eth] . '.';
+        return 'If any people are visible, they must ALL look ' . $map[$eth]
+             . ' - no person of any other ethnicity anywhere in the frame.';
     }
 
     /**

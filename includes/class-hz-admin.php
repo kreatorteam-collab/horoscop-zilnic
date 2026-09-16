@@ -27,6 +27,7 @@ class HZ_Admin {
         add_action('update_option_hzb_magnific_key', function () {
             HZ_Magnific::reset_daily_state();
             delete_option('hzb_paused_reason');
+            delete_option('hzb_paused_src');
             wp_clear_scheduled_hook(HZ_Bulk::HOOK);
             if (!(int) get_option('hzb_stopped', 0)) {
                 wp_schedule_single_event(time() + 5, HZ_Bulk::HOOK);
@@ -692,7 +693,7 @@ class HZ_Admin {
                                 <option value="white" <?php selected($hzb_eth, 'white'); ?>><?php esc_html_e('Doar persoane europene (albe)', 'horoscop-zilnic'); ?></option>
                                 <option value="" <?php selected($hzb_eth, ''); ?>><?php esc_html_e('Fără filtru', 'horoscop-zilnic'); ?></option>
                             </select>
-                            <p class="description"><?php esc_html_e('Se aplică și la stocul Magnific, și la imaginile generate cu AI. Dacă subiectul n-are fotografii potrivite cu persoane, se caută fotografii fără persoane și abia la final una nefiltrată — ca articolul să nu rămână fără poză.', 'horoscop-zilnic'); ?></p>
+                            <p class="description"><?php esc_html_e('Se aplică și la stocul Magnific, și la imaginile generate cu AI. Dacă subiectul n-are fotografii potrivite cu persoanele cerute, se caută fotografii FĂRĂ persoane, apoi se lărgește căutarea — nu se mai întoarce niciodată o poză nefiltrată, deci nu apare altă etnie în articole.', 'horoscop-zilnic'); ?></p>
                         </td>
                     </tr>
                     <tr>

@@ -202,11 +202,51 @@ class HZ_Horoscope {
     }
 
     /** Scoate eventualele garduri ```html ... ``` și un H1/titlu rătăcit la început. */
+    /**
+     * „Cuvântul zilei" încheie fiecare zodie, dar modelul îl scrie când cu <strong>, când
+     * fără, când doar pe etichetă („<strong>Cuvântul zilei:</strong> curaj") — așa că în
+     * aceeași pagină unele zodii ies bold și altele nu. E o decizie de formatare luată
+     * de 12 ori într-un singur răspuns, deci promptul nu o poate garanta: o impunem aici,
+     * după generare. Expresia întreagă, cu punct cu tot, ajunge într-un singur <strong>.
+     */
+    private function bold_word_of_day($html) {
+        // „Cuvântul"/„Cuvantul"/„Cuvîntul", oricâte spații, cu sau fără spațiu înainte de „:".
+        $label = 'Cuv[\x{00E2}\x{00EE}a]ntul\s+zilei\s*:';
+
+        // 1. Scoatem bold-ul lipit de etichetă (varianta „doar eticheta e bold").
+        $html = self::re($html, '~<(?:strong|b)\b[^>]*>\s*(' . $label . ')~iu', '$1');
+        $html = self::re($html, '~(' . $label . ')\s*</(?:strong|b)>~iu', '$1');
+
+        // 2. Rescriem expresia într-o singură formă. Cuvântul se oprește la primul „."
+        //    sau „<" (clasa le exclude), deci dacă lipsește punctul nu înghițim restul
+        //    paragrafului; un </strong> rămas de la varianta boldă se consumă aici, ca să
+        //    nu rămână o etichetă de închidere în aer.
+        // Punctul poate sta si DUPA </strong> („: calm</strong>."), de aceea apare de
+        // doua ori; spatiile se consuma doar daca duc la eticheta de inchidere, altfel
+        // am lipi cuvantul urmator de bold.
+        $re = '~' . $label . '\s*([^<.]{1,80})\.?(?:\s*</(?:strong|b)>)?\.?~iu';
+        $out = preg_replace_callback($re, function ($m) {
+            $word = trim($m[1]);
+            if ($word === '') { return $m[0]; }
+            return '<strong>Cuvântul zilei: ' . $word . '.</strong>';
+        }, $html);
+
+        return is_string($out) ? $out : $html;
+    }
+
+    /** preg_replace care, dacă dă greș, lasă textul neatins (mai bine nestilizat decât gol). */
+    private static function re($text, $pattern, $replacement) {
+        $out = preg_replace($pattern, $replacement, $text);
+        return is_string($out) ? $out : $text;
+    }
+
     private function clean_html($text) {
         $text = trim((string) $text);
         $text = preg_replace('/^```[a-z]*\s*/i', '', $text);
         $text = preg_replace('/\s*```$/', '', $text);
         $text = preg_replace('/^\s*<h1[^>]*>.*?<\/h1>\s*/is', '', $text);
+        // Bold consecvent pe „Cuvântul zilei: ..." la toate cele 12 zodii.
+        $text = $this->bold_word_of_day($text);
         return trim($text);
     }
 

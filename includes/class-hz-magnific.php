@@ -311,30 +311,47 @@ class HZ_Magnific {
      */
     const ETHNICITIES = array('white', 'black', 'hispanic', 'indian', 'east-asian', 'south-asian', 'southeast-asian', 'middle-eastern', 'multiracial');
 
+    /**
+     * Cuvinte care, în titlul sau tagurile resursei, arată o poză nepotrivită ca
+     * imagine de articol: grafică în loc de fotografie, poze „de catalog" pe fundal
+     * alb, machete, colaje. Nu le excludem, doar le trimitem la coada clasamentului.
+     */
+    const BAD_HINTS = array('isolated', 'white background', 'grey background', 'gray background',
+        'plain background', 'studio shot', 'posing', 'poses', 'thumbs up', 'looking at camera',
+        'copy space', 'mockup', 'mock up', 'collage', 'illustration', 'drawing', 'cartoon',
+        'clipart', 'render', 'banner', 'template', 'watermark', 'icon set');
+
+    /** Cuvinte prea comune ca să conteze la potrivirea cu titlul/tagurile resursei. */
+    const STOP_WORDS = array('the', 'and', 'for', 'with', 'from', 'photo', 'image',
+        'picture', 'stock', 'that', 'this', 'your', 'you', 'are', 'its');
+
     public static function ethnicity() {
         $e = trim((string) get_option('hzb_people_ethnicity', 'white'));
         return in_array($e, self::ETHNICITIES, true) ? $e : '';
     }
 
     /**
-     * Caută fotografii de stock. Returnează array de resurse (id, title, preview)
-     * sau WP_Error. Interogarea trebuie să fie în engleză pentru rezultate bune.
+     * Caută fotografii de stock. Returnează resursele (id, title, preview, keywords,
+     * downloads) ORDONATE după cât de bine se potrivesc cu interogarea, sau WP_Error.
+     * Interogarea trebuie să fie în engleză — stocul e indexat în engleză.
      *
-     * Cu filtrul de etnie pornit căutarea merge pe TREPTE, ca articolul să nu rămână
-     * fără poză: (1) fotografii cu persoane de etnia cerută; (2) dacă nu există,
-     * fotografii FĂRĂ persoane (peisaje, obiecte, mâncare — majoritatea subiectelor,
-     * unde filtrul de persoane ar da zero rezultate); (3) abia la final căutarea
-     * nefiltrată. Deci ori persoanele din poză sunt cele cerute, ori poza n-are
-     * persoane deloc.
+     * $alt = interogări de rezervă, mai largi (le dă HZ_Bulk din aceeași traducere a
+     * titlului). Se folosesc doar dacă prima nu întoarce nimic, deci o poză de nișă
+     * bate mereu una generică.
+     *
+     * Cu filtrul de etnie pornit cerem, pentru fiecare interogare, DOUĂ liste pe care
+     * le judecăm împreună: (1) fotografii cu persoane de etnia cerută și (2) fotografii
+     * FĂRĂ persoane. Ori persoanele din poză sunt cele cerute, ori poza n-are persoane
+     * deloc — nu mai există treaptă nefiltrată care să strecoare altă etnie.
      */
-    public static function search($term, $limit = 10) {
+    public static function search($term, $limit = 10, $alt = array()) {
         if (!self::has_key()) {
             return new WP_Error('hzb_no_key', 'Cheia API Magnific nu este configurată.');
         }
 
-        $base = array(
-            'term'  => $term,
-            'limit' => max(1, min(50, (int) $limit)),
+        $limit = max(1, min(50, (int) $limit));
+        $base  = array(
+            'limit' => $limit,
             'order' => 'relevance',
             'filters[content_type][photo]'     => 1,
             'filters[orientation][landscape]'  => 1,
@@ -343,34 +360,191 @@ class HZ_Magnific {
             $base['filters[ai-generated][excluded]'] = 1;
         }
 
-        $steps = array();
-        $eth   = self::ethnicity();
+        $eth = self::ethnicity();
         if ($eth !== '') {
-            $steps[] = array('filters[people][ethnicity]' => $eth);
-            $steps[] = array('filters[people][exclude]'   => 1);
+            // `include` explicit: singur, filtrul de etnie nu spune API-ului că vrem
+            // neapărat oameni în cadru, iar prima listă s-ar amesteca cu a doua.
+            $people = array(
+                array('filters[people][include]' => 1, 'filters[people][ethnicity]' => $eth),
+                array('filters[people][exclude]' => 1),
+            );
+        } else {
+            $people = array(array());
         }
-        $steps[] = array(); // fără filtru de persoane
 
-        foreach ($steps as $extra) {
-            $results = self::do_search(array_merge($base, $extra));
-            if (is_wp_error($results)) {
-                // Dacă API-ul refuză filtrul de persoane (dacă își schimbă numele sau
-                // valorile), nu pierdem poza: trecem la treapta următoare. Eroarea de
-                // pe treapta nefiltrată e reală și se raportează mai departe.
-                if (!empty($extra)) { continue; }
-                return $results;
+        $steps = self::term_steps($term, $alt);
+        // Interogarea precisă ȘI cea largă se caută ÎMPREUNĂ, într-un singur coș.
+        // Înainte, prima care întorcea ceva câștiga — iar pentru un subiect medical
+        // („tiroida hipoactivă") stocul are doar câteva cadre pozate de studio, deci
+        // articolul primea o poză urâtă fără să se uite nimeni la „diete", unde sunt
+        // mii de fotografii bune. Acum se judecă toate la un loc.
+        $rounds = array(
+            array(array_slice($steps, 0, 2), true),   // precisă + largă
+            array(array_slice($steps, 2), true),      // abia apoi scurtarea
+            array($steps, false),                     // ultima șansă: fără orientare
+        );
+
+        $err = null;
+        foreach ($rounds as $round) {
+            list($terms, $keep_orientation) = $round;
+            if (empty($terms)) { continue; }
+            $b = $base;
+            if (!$keep_orientation) { unset($b['filters[orientation][landscape]']); }
+
+            $pool = array();
+            foreach ($terms as $t) {
+                foreach ($people as $extra) {
+                    $res = self::do_search(array_merge($b, array('term' => $t), $extra));
+                    if (is_wp_error($res)) {
+                        // Dacă API-ul refuză filtrul de persoane (își schimbă numele sau
+                        // valorile), nu pierdem poza: mergem mai departe. Eroarea se
+                        // raportează doar dacă nu găsim nimic pe nicio treaptă.
+                        $err = $res;
+                        continue;
+                    }
+                    foreach ($res as $r) {
+                        if (!isset($pool[$r['id']])) { $pool[$r['id']] = $r; }
+                    }
+                }
             }
-            if (!empty($results)) { return $results; }
+            if (!empty($pool)) {
+                return array_slice(self::rank($pool, $steps), 0, $limit);
+            }
         }
+        return $err !== null ? $err : array();
+    }
 
-        // Zero rezultate pe toate treptele: mai încercăm o dată fără filtrul de
-        // orientare, pe aceleași trepte (păstrăm preferința pentru persoane).
-        unset($base['filters[orientation][landscape]']);
-        foreach ($steps as $extra) {
-            $results = self::do_search(array_merge($base, $extra));
-            if (!is_wp_error($results) && !empty($results)) { return $results; }
+    /**
+     * Treptele de interogare: cea exactă, apoi varianta mai largă primită de la
+     * traducere, apoi o scurtare automată la primele două cuvinte.
+     */
+    private static function term_steps($term, $alt) {
+        $out = array();
+        $add = function ($t) use (&$out) {
+            $t = trim(preg_replace('/\s+/', ' ', (string) $t));
+            if ($t !== '' && !in_array($t, $out, true)) { $out[] = $t; }
+        };
+        $add($term);
+        foreach ((array) $alt as $a) { $add($a); }
+        $w = preg_split('/\s+/', trim((string) $term));
+        if (count($w) > 2) { $add(implode(' ', array_slice($w, 0, 2))); }
+        return $out;
+    }
+
+    /** Cuvintele „grele" ale interogării, pentru potrivirea cu titlul/tagurile resursei. */
+    private static function query_words($term) {
+        $parts = preg_split('/[^\p{L}\p{N}]+/u', self::lower($term));
+        $out   = array();
+        foreach ((array) $parts as $x) {
+            if (strlen($x) < 3 || in_array($x, self::STOP_WORDS, true)) { continue; }
+            $out[] = $x;
         }
-        return array();
+        return array_values(array_unique($out));
+    }
+
+    /**
+     * Litere mici, fără să depindem de mbstring: WordPress pune polyfill doar
+     * pentru mb_substr/mb_strlen, nu și pentru mb_strtolower.
+     */
+    private static function lower($s) {
+        return function_exists('mb_strtolower') ? mb_strtolower((string) $s) : strtolower((string) $s);
+    }
+
+    /**
+     * Ordonează candidații. Relevanța se măsoară față de TOATE interogările, dar
+     * cea precisă cântărește întreg, iar cele largi 60% — așa, o poză bună de la
+     * „diete" poate întrece un cadru urât care se potrivește pe „tiroidă", fără ca
+     * o potrivire exactă bună să fie vreodată dată la o parte.
+     *
+     * Peste relevanță se adaugă semnalele de calitate pe care API-ul le dă și pe
+     * care nu le foloseam: licența premium, anul apariției, rezoluția, popularitatea
+     * — și penalizarea cadrului pozat de studio, sursa pozelor care „arată rău".
+     * Resursele deja folosite pe site cad la coadă.
+     */
+    private static function rank($pool, $terms) {
+        $sets   = array();
+        $weight = 1.0;
+        foreach ((array) $terms as $t) {
+            $words = self::query_words($t);
+            if (!empty($words)) { $sets[] = array($words, $weight); }
+            $weight = 0.6;
+        }
+        $used = array_flip(self::all_used_ids());
+        $list = array_values($pool);
+
+        foreach ($list as $i => $r) {
+            $hay = self::lower($r['title'] . ' ' . implode(' ', $r['keywords']));
+
+            $s = 0.0;
+            foreach ($sets as $set) {
+                $hit = 0;
+                foreach ($set[0] as $w) {
+                    if (strpos($hay, $w) !== false) { $hit++; }
+                }
+                $v = ($hit / count($set[0])) * 100.0 * $set[1];
+                if ($v > $s) { $s = $v; }
+            }
+
+            // Popularitatea n-are voie să bată relevanța: cel mult 10 puncte.
+            $s += min(10.0, log10(max(1, (int) $r['downloads'])) * 2.0);
+            // Premium = fotografie plătită; în medie, altă ligă față de gratuite.
+            if (!empty($r['premium'])) { $s += 6.0; }
+            // Stocul vechi se vede că e vechi (lumină, machiaj, haine, procesare).
+            $age = $r['year'] > 0 ? ((int) gmdate('Y') - (int) $r['year']) : 99;
+            if ($age <= 2)      { $s += 8.0; }
+            elseif ($age <= 5)  { $s += 4.0; }
+            elseif ($age >= 10) { $s -= 6.0; }
+            // Rezoluția mare = ședință foto adevărată, nu cadru recuperat.
+            if ((int) $r['width'] >= 5000)     { $s += 4.0; }
+            elseif ((int) $r['width'] >= 3000) { $s += 2.0; }
+            // Cadrul pozat de studio (fundal gri, „thumbs up", privit în obiectiv)
+            // e principala sursă de poze care arată prost într-un articol. Penalizarea
+            // trebuie să bată o potrivire perfectă de cuvinte (100): în modă, stocul e
+            // plin de decupaje pe alb care se potrivesc pe toate cuvintele din titlu.
+            foreach (self::BAD_HINTS as $bad) {
+                if (strpos($hay, $bad) !== false) { $s -= 40.0; break; }
+            }
+            // Ordinea dată de API e ea însăși un semnal; o păstrăm ca departajare.
+            $s -= (float) $r['pos'] * 0.1;
+            if (isset($used[$r['id']])) { $s -= 1000.0; }
+            $list[$i]['score'] = $s;
+        }
+        usort($list, function ($a, $b) {
+            if ($a['score'] == $b['score']) { return $a['pos'] - $b['pos']; }
+            return ($a['score'] < $b['score']) ? 1 : -1;
+        });
+        return self::spread($list);
+    }
+
+    /** Cât de mult sub primul clasat mai considerăm un candidat „la fel de bun". */
+    const SPREAD_BAND = 12.0;
+
+    /**
+     * Împrăștie alegerea ÎNTRE site-uri. Toată flota primește aceeași listă de la
+     * Magnific pentru un subiect, deci dacă fiecare site ia primul rezultat, aceeași
+     * poză ajunge pe zeci de site-uri (verificat: un fișier era pe 20 din 77).
+     * Candidații practic la fel de relevanți (în banda SPREAD_BAND sub primul) se
+     * reordonează după o cheie derivată din domeniu: alt site = altă poză, dar pe
+     * ACELAȘI site ordinea e stabilă (nu se schimbă de la o rulare la alta) și
+     * relevanța nu are de suferit — toți din bandă se potrivesc aproape la fel.
+     */
+    private static function spread($list) {
+        $n = count($list);
+        if ($n < 2) { return $list; }
+        $top  = $list[0]['score'];
+        $band = 0;
+        while ($band < $n && $list[$band]['score'] >= $top - self::SPREAD_BAND) { $band++; }
+        if ($band < 2) { return $list; }
+
+        $seed = md5(home_url('/'));
+        $head = array_slice($list, 0, $band);
+        usort($head, function ($a, $b) use ($seed) {
+            $ka = crc32($seed . ':' . $a['id']);
+            $kb = crc32($seed . ':' . $b['id']);
+            if ($ka === $kb) { return $a['pos'] - $b['pos']; }
+            return ($ka < $kb) ? -1 : 1;
+        });
+        return array_merge($head, array_slice($list, $band));
     }
 
     private static function do_search($args) {
@@ -387,13 +561,57 @@ class HZ_Magnific {
         }
         $out = array();
         if (isset($body['data']) && is_array($body['data'])) {
+            $pos = 0;
             foreach ($body['data'] as $r) {
                 if (!isset($r['id'])) { continue; }
                 $out[] = array(
-                    'id'      => (int) $r['id'],
-                    'title'   => isset($r['title']) ? (string) $r['title'] : '',
-                    'preview' => isset($r['image']['source']['url']) ? (string) $r['image']['source']['url'] : '',
+                    'id'        => (int) $r['id'],
+                    'title'     => isset($r['title']) ? (string) $r['title'] : '',
+                    'preview'   => isset($r['image']['source']['url']) ? (string) $r['image']['source']['url'] : '',
+                    'keywords'  => self::keywords_of($r),
+                    'downloads' => isset($r['stats']['downloads']) ? (int) $r['stats']['downloads'] : 0,
+                    // Semnale de calitate pe care API-ul le dă și pe care nu le foloseam:
+                    // licența (premium = fotografie plătită, alt nivel decât gratuitele),
+                    // anul apariției (stocul vechi arată vizibil vechi) și rezoluția.
+                    'premium'   => self::is_premium($r),
+                    'year'      => isset($r['meta']['published_at'])
+                        ? (int) substr((string) $r['meta']['published_at'], 0, 4) : 0,
+                    'width'     => self::width_of($r),
+                    'pos'       => $pos++,
                 );
+            }
+        }
+        return $out;
+    }
+
+    /** True dacă resursa e premium (plătită) — în medie, fotografii mai bune. */
+    private static function is_premium($r) {
+        if (!isset($r['licenses']) || !is_array($r['licenses'])) { return false; }
+        foreach ($r['licenses'] as $l) {
+            $t = is_array($l) ? (isset($l['type']) ? (string) $l['type'] : '') : (string) $l;
+            if (strtolower($t) === 'premium') { return true; }
+        }
+        return false;
+    }
+
+    /** Lățimea originalului din `image.source.size` (format „WxH"). */
+    private static function width_of($r) {
+        $size = isset($r['image']['source']['size']) ? (string) $r['image']['source']['size'] : '';
+        if ($size === '' || strpos($size, 'x') === false) { return 0; }
+        $parts = explode('x', strtolower($size));
+        return (int) trim($parts[0]);
+    }
+
+    /** Tagurile resursei din `related.keywords` (listă de {name, slug} sau de șiruri). */
+    private static function keywords_of($r) {
+        $k = isset($r['related']['keywords']) ? $r['related']['keywords'] : array();
+        if (!is_array($k)) { return array(); }
+        $out = array();
+        foreach ($k as $item) {
+            if (is_array($item)) {
+                if (isset($item['name'])) { $out[] = (string) $item['name']; }
+            } elseif (is_string($item)) {
+                $out[] = $item;
             }
         }
         return $out;
@@ -474,20 +692,53 @@ class HZ_Magnific {
         return (int) $att_id;
     }
 
-    /* ---- Evidența resurselor deja folosite (anti-duplicat între articole) ---- */
+    /* ---- Evidența resurselor deja folosite (anti-duplicat între articole) ----
+     * Două liste care se completează:
+     *   - `hzb_used_ids` = ultimele 500, în opțiuni (rapid, fără interogare în DB);
+     *   - biblioteca media = TOT ce am descărcat vreodată, citit din meta
+     *     `_hzb_magnific_id` pe atașamente.
+     * Doar prima nu ajungea: după câteva luni ID-ul iese din fereastra de 500 și
+     * aceeași poză se descarcă din nou (văzut pe inspirate.ro de 3 ori în 19 luni). */
 
     public static function used_ids() {
         $ids = get_option('hzb_used_ids', array());
         return is_array($ids) ? array_map('intval', $ids) : array();
     }
 
+    /**
+     * Toate resursele Magnific existente în biblioteca media a site-ului. Ținut în
+     * transient o oră: la scrierea în lot ar fi o interogare per articol degeaba.
+     */
+    public static function library_ids() {
+        $c = get_transient('hzb_lib_ids');
+        if (is_array($c)) { return $c; }
+        global $wpdb;
+        $ids = $wpdb->get_col("SELECT DISTINCT meta_value FROM {$wpdb->postmeta} WHERE meta_key = '_hzb_magnific_id'");
+        $ids = array_values(array_unique(array_map('intval', (array) $ids)));
+        set_transient('hzb_lib_ids', $ids, HOUR_IN_SECONDS);
+        return $ids;
+    }
+
+    /** Evidența completă: fereastra rapidă din opțiuni + biblioteca media. */
+    public static function all_used_ids() {
+        return array_values(array_unique(array_merge(self::used_ids(), self::library_ids())));
+    }
+
     public static function mark_used($resource_id) {
         $ids   = self::used_ids();
         $ids[] = (int) $resource_id;
-        // Păstrăm doar ultimele 500 — suficient anti-duplicat, fără să crească la infinit.
+        // Fereastra rapidă rămâne la 500; memoria de durată e biblioteca media.
         if (count($ids) > 500) {
             $ids = array_slice($ids, -500);
         }
         update_option('hzb_used_ids', array_values(array_unique($ids)), 'no');
+
+        // Ținem cache-ul bibliotecii la zi în loc să-l invalidăm: altfel fiecare
+        // articol din lot ar reface interogarea în postmeta.
+        $lib = get_transient('hzb_lib_ids');
+        if (is_array($lib)) {
+            $lib[] = (int) $resource_id;
+            set_transient('hzb_lib_ids', array_values(array_unique($lib)), HOUR_IN_SECONDS);
+        }
     }
 }

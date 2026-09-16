@@ -398,6 +398,7 @@ class HZ_Bulk {
             'queue_pending'=> $pending,
             'stopped'      => (int) get_option('hzb_stopped', 0),
             'paused'       => (string) get_option('hzb_paused_reason', ''),
+            'paused_src'   => (string) get_option('hzb_paused_src', ''),
             'gap'          => (int) get_option('hzb_gap', 120),
             // Lock ținut, dar nimic „în lucru" = rulare moartă; panoul oferă deblocarea.
             'locked'       => get_transient(self::LOCK) ? 1 : 0,
@@ -438,6 +439,7 @@ class HZ_Bulk {
                 // vede butonul apăsat, dar coada nu pornește niciodată.
                 update_option('hzb_stopped', 0, 'no');
                 delete_option('hzb_paused_reason');
+                delete_option('hzb_paused_src');
                 if ($pending > 0) { $this->kick(); }
                 return $pending > 0
                     ? sprintf('%d articole repuse în coadă (%d de procesat).', $n, $pending)
@@ -449,6 +451,7 @@ class HZ_Bulk {
                 }
                 $this->save_queue($q);
                 delete_option('hzb_paused_reason');
+                delete_option('hzb_paused_src');
                 return 'Coada a fost golită.';
 
             // Lock-ul e un transient de 30 min pus la începutul fiecărui articol. Dacă
@@ -510,6 +513,7 @@ class HZ_Bulk {
             'exhausted' => $exhausted ? 1 : 0,
             'reset'     => wp_date('d.m H:i', HZ_Magnific::next_reset_ts()),
             'paused'    => (string) get_option('hzb_paused_reason', ''),
+            'paused_src'=> (string) get_option('hzb_paused_src', ''),
             'stopped'   => (int) get_option('hzb_stopped', 0),
         ));
     }
@@ -681,6 +685,7 @@ class HZ_Bulk {
         }
         $this->save_queue($q);
         delete_option('hzb_paused_reason');
+        delete_option('hzb_paused_src');
         wp_send_json_success(array('message' => 'Coada a fost golită.'));
     }
 
@@ -710,6 +715,10 @@ class HZ_Bulk {
             }
         }
         if (!$cand) {
+            // Nimic de scris = niciun blocaj activ. Fara asta, motivul ramanea agatat
+            // pe site dupa ce itemii blocati erau terminati sau sterși.
+            delete_option('hzb_paused_reason');
+            delete_option('hzb_paused_src');
             delete_transient(self::LOCK);
             return;
         }
@@ -737,6 +746,10 @@ class HZ_Bulk {
         }
         if ($idx === null) {
             update_option('hzb_paused_reason', $block['msg'], 'no');
+            // Sursa blocajului, ca panoul sa nu lipeasca mesajul pe loturi care
+            // n-au treaba cu el: procesarea e per sursa din v3.31.0, dar motivul
+            // ramasese un singur sir global, afisat pe ORICE lot al site-ului.
+            update_option('hzb_paused_src', isset($block['src']) ? (string) $block['src'] : '', 'no');
             delete_transient(self::LOCK);
             // Cota se resetează singură la 00:00 UTC, deci ne reprogramăm exact
             // atunci. Cheia lipsă NU se rezolvă de la sine: acolo coada stă până o
@@ -747,6 +760,7 @@ class HZ_Bulk {
             return;
         }
         delete_option('hzb_paused_reason');
+                delete_option('hzb_paused_src');
 
         $q[$idx]['s']       = 'working';
         $q[$idx]['started'] = time(); // v3.4.8: de aici se măsoară „prea vechi = reia"
@@ -1072,6 +1086,7 @@ class HZ_Bulk {
                     'msg' => 'Nu e configurată cheia OpenAI, deci nu putem genera imagini cu AI și '
                            . 'articolele ar ieși fără poze — coada așteaptă. Pune cheia în setări și pornește singură.',
                     'at'  => 0,
+                    'src' => 'ai',
                 );
             }
             return null;
@@ -1081,6 +1096,7 @@ class HZ_Bulk {
                 'msg' => 'Nu e configurată cheia API Magnific, deci articolele ar ieși fără poze — '
                        . 'coada așteaptă. Pune cheia în setări (tab Articole Bulk) și pornește singură.',
                 'at'  => 0,
+                'src' => 'magnific',
             );
         }
         // ensure_usable_key() roteste singur pe alta cheie din pool daca cea
@@ -1097,6 +1113,7 @@ class HZ_Bulk {
                     wp_date('d.m.Y H:i', $t)
                 ),
                 'at'  => $t,
+                'src' => 'magnific',
             );
         }
         return null;
@@ -1146,14 +1163,34 @@ class HZ_Bulk {
         }
 
         // Fără căutare web aici: e un micro-apel de traducere, n-are nevoie de internet.
-        $qr = CW_Usage::with_context('imagini', function () use ($model, $title) {
-            return CW_API::no_web(function () use ($model, $title) {
-                return CW_API::generate($model, 'Translate this Romanian article title into a short English stock photo search query (3-5 generic, visual keywords). Reply with ONLY the keywords, nothing else: ' . $title, 100);
+        // Cerem DOUĂ interogări dintr-un singur apel: una precisă (relevanța) și una
+        // largă (plasa de siguranță). Fără a doua, un titlu de nișă combinat cu filtrul
+        // de persoane dădea zero rezultate și articolul rămânea fără poză.
+        $prompt = "You choose stock photos for a Romanian online magazine. From the article title below, write English stock photo search queries.\n"
+                . "Line 1: the most specific query a stock library would actually have - 2 to 4 concrete visual words naming what must be IN the photo (the subject, plus its action or setting).\n"
+                . "Line 2: a broader fallback - 1 or 2 words naming the general scene or object.\n"
+                . "Never use personal names, brand names, place names, numbers, dates or abstract words. Lowercase, no punctuation, exactly two lines, nothing else.\n"
+                . 'Title: ' . $title;
+        $qr = CW_Usage::with_context('imagini', function () use ($model, $prompt) {
+            return CW_API::no_web(function () use ($model, $prompt) {
+                return CW_API::generate($model, $prompt, 100);
             });
         });
-        $query = is_wp_error($qr) ? '' : trim(preg_replace('/[^\p{L}\p{N} \-]/u', '', $qr['text']));
-        if (!is_wp_error($qr)) { $out['cost'] += (float) $qr['cost']; }
-        if ($query === '') { $query = $title; }
+        $queries = array();
+        if (!is_wp_error($qr)) {
+            $out['cost'] += (float) $qr['cost'];
+            foreach (preg_split('/\R/u', (string) $qr['text']) as $line) {
+                $line = preg_replace('/[^\p{L}\p{N} \-]/u', '', (string) $line);
+                // Modelul mai numerotează liniile („Line 1:", „1.") — scoatem eticheta.
+                $line = preg_replace('/^[\s\-]*(?:line\s*)?(?:\d+\s+)?/iu', '', $line);
+                $w    = preg_split('/\s+/', trim($line), -1, PREG_SPLIT_NO_EMPTY);
+                $line = implode(' ', array_slice($w, 0, 5));
+                if ($line !== '' && !in_array($line, $queries, true)) { $queries[] = $line; }
+                if (count($queries) >= 2) { break; }
+            }
+        }
+        if (empty($queries)) { $queries[] = $title; }
+        $query = $queries[0];
 
         // --- Sursa AI: generam $limit imagini din cuvintele cheie ---
         if ($ai) {
@@ -1177,16 +1214,39 @@ class HZ_Bulk {
             return $out;
         }
 
-        $found = HZ_Magnific::search($query, 12);
+        // Mai mulți candidați (24) ca să aibă pe ce lucra clasamentul din
+        // HZ_Magnific::rank(); căutarea nu consumă cota de descărcări.
+        $found = HZ_Magnific::search($query, 24, array_slice($queries, 1));
         if (is_wp_error($found)) {
             $out['note'] = $found->get_error_message();
             return $out;
         }
 
-        $used = HZ_Magnific::used_ids();
+        // Evidenta COMPLETA (inclusiv biblioteca media), nu doar ultimele 500.
+        // Candidatii inca nefolositi pe site; modelul alege doar dintre ei.
+        $used  = HZ_Magnific::all_used_ids();
+        $avail = array();
         foreach ($found as $r) {
+            if (!in_array($r['id'], $used, true)) { $avail[] = $r; }
+        }
+        $k = $this->pick_image($title, $avail, $model, $out['cost']);
+        // Marcam in nota cine a ales: fara asta, o alegere esuata (model fara raspuns)
+        // cade tacut pe clasamentul de cuvinte si nu se vede nicaieri ca n-a mers.
+        if (count($avail) < 2) {
+            $pick_note = 'un candidat';
+        } elseif ($k > -1) {
+            $pick_note = 'model #' . ($k + 1) . '/' . min(12, count($avail));
+        } else {
+            $pick_note = 'scor (modelul n-a ales)';
+        }
+        if ($k > 0) {
+            $chosen = $avail[$k];
+            array_splice($avail, $k, 1);
+            array_unshift($avail, $chosen);
+        }
+
+        foreach ($avail as $r) {
             if (count($out['ids']) >= $limit) { break; }
-            if (in_array($r['id'], $used, true)) { continue; }
             $att = HZ_Magnific::sideload($r['id'], 0, $title);
             if (is_wp_error($att)) {
                 $out['note'] = $att->get_error_message();
@@ -1204,7 +1264,56 @@ class HZ_Bulk {
         if (empty($out['ids']) && $out['note'] === '') {
             $out['note'] = 'Nicio imagine de stock găsită pentru: ' . $query;
         }
+        if (!empty($out['ids'])) {
+            $out['note'] = trim($out['note'] . ' [poză: ' . $pick_note . ']');
+        }
         return $out;
+    }
+
+    /**
+     * Alege coverul dintre candidații găsiți. Potrivirea de cuvinte nu e de ajuns:
+     * tagurile stocului sunt zgomotoase — o fotografie cu o femeie care meditează
+     * printre cutii are tagul „jeans" fiindcă poartă blugi, deci bate la scor o
+     * fotografie chiar DESPRE blugi. Diferența dintre „poză despre subiect" și
+     * „subiect apărut întâmplător în cadru" o poate face doar modelul, citind
+     * titlurile candidaților.
+     *
+     * Apelul e mic (titluri, nu text) și se contorizează pe contextul „imagini".
+     * Întoarce indexul ales din $found sau -1 dacă alegerea n-a reușit — caz în
+     * care rămâne ordinea dată de clasamentul din HZ_Magnific.
+     */
+    private function pick_image($title, $found, $model, &$cost) {
+        $n = min(12, count($found));
+        if ($n < 2) { return -1; }
+
+        $lines = array();
+        for ($i = 0; $i < $n; $i++) {
+            $kw = isset($found[$i]['keywords']) ? array_slice((array) $found[$i]['keywords'], 0, 8) : array();
+            $lines[] = ($i + 1) . '. ' . $found[$i]['title']
+                     . (!empty($kw) ? ' [' . implode(', ', $kw) . ']' : '');
+        }
+
+        $prompt = "You pick the cover photo for an article on a Romanian magazine.\n"
+                . 'Article title (Romanian): ' . $title . "\n\n"
+                . "Candidate stock photos:\n" . implode("\n", $lines) . "\n\n"
+                . "Pick the ONE photo that actually SHOWS what the title is about.\n"
+                . "- A photo where the subject appears only by accident does NOT count: someone who happens to be wearing jeans is not a photo about jeans.\n"
+                . "- Reject people cut out on a plain white or grey studio background, thumbs-up gestures, and posed-for-the-camera shots.\n"
+                . "- Prefer a natural, real-life scene that a magazine would actually run.\n"
+                . "Answer with the number alone, nothing else. If none of them fits, answer 0.";
+
+        $r = CW_Usage::with_context('imagini', function () use ($model, $prompt) {
+            return CW_API::no_web(function () use ($model, $prompt) {
+                // La modelele cu raționament, tokenii de gândire intră în același
+                // plafon: cu un buget mic răspunsul iese GOL (dar taxat).
+                return CW_API::generate($model, $prompt, 1200);
+            });
+        });
+        if (is_wp_error($r)) { return -1; }
+        $cost += (float) $r['cost'];
+        if (!preg_match('/\d+/', (string) $r['text'], $m)) { return -1; }
+        $k = (int) $m[0];
+        return ($k >= 1 && $k <= $n) ? $k - 1 : -1;
     }
 
     /**
