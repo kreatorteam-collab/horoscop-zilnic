@@ -50,12 +50,25 @@ class HZ_Bulk {
 
     /* ---- Coada (stocată în opțiune, fără autoload) ---- */
 
+    /* v3.46.1: coada se citește MEREU din DB, nu din cache-ul de opțiuni. get_option()
+     * ține valoarea în memorie pe tot requestul, deci recitirea din process_tick() după
+     * un articol (1-3 min) întorcea coada de la ÎNCEPUTUL rulării și save_queue() ștergea
+     * tot ce se adăugase între timp. Așa s-au pierdut loturi întregi trimise din panou
+     * cât site-ul scria un articol (19.09.2026: 134 articole, sent=1 dar absente pe site). */
     private function queue() {
-        $q = get_option('hzb_queue', array());
+        global $wpdb;
+        wp_cache_delete('hzb_queue', 'options');
+        $raw = $wpdb->get_var($wpdb->prepare(
+            "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s LIMIT 1", 'hzb_queue'
+        ));
+        $q = $raw === null ? array() : maybe_unserialize($raw);
         return is_array($q) ? $q : array();
     }
 
     private function save_queue($q) {
+        // update_option() compară cu valoarea din cache și sare scrierea dacă „nu s-a
+        // schimbat"; golim cache-ul ca să compare cu ce e efectiv în DB.
+        wp_cache_delete('hzb_queue', 'options');
         update_option('hzb_queue', array_values($q), 'no');
     }
 
