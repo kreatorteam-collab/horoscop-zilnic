@@ -467,6 +467,25 @@ class HZ_Bulk {
                 delete_option('hzb_paused_src');
                 return 'Coada a fost golită.';
 
+            // Anularea UNUI lot (butonul „Șterge" din panoul central): scoate din coadă
+            // doar articolele lotului care nu sunt în lucru. Spre deosebire de „clear",
+            // nu atinge loturile celorlalte comenzi care împart același site.
+            case 'cancel':
+                if ($batch === '') { return 'Lipsește lotul.'; }
+                $q = array();
+                $n = 0;
+                $working = 0;
+                foreach ($this->queue() as $item) {
+                    $inBatch = isset($item['b']) && $item['b'] === $batch;
+                    if (!$inBatch) { $q[] = $item; continue; }
+                    if ($item['s'] === 'working') { $q[] = $item; $working++; continue; }
+                    $n++;
+                }
+                $this->save_queue($q);
+                return $working > 0
+                    ? sprintf('Lot anulat: %d articole scoase din coadă; 1 era în lucru și se termină.', $n)
+                    : sprintf('Lot anulat: %d articole scoase din coadă.', $n);
+
             // Lock-ul e un transient de 30 min pus la începutul fiecărui articol. Dacă
             // rularea moare (timeout PHP, worker ucis), lock-ul rămâne și coada stă pe
             // loc, aparent fără motiv — asta îl scoate și repornește procesarea.
