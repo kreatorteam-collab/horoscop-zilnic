@@ -674,7 +674,7 @@ class HZ_Remote {
         if ($data instanceof WP_REST_Response) { return $data; }
 
         $action = isset($data['action']) ? sanitize_key((string) $data['action']) : '';
-        if (!in_array($action, array('start', 'stop', 'retry', 'clear', 'unlock', 'cancel'), true)) {
+        if (!in_array($action, array('start', 'stop', 'retry', 'clear', 'unlock', 'cancel', 'pause_batch', 'resume_batch'), true)) {
             return new WP_REST_Response(array('error' => 'bad_action'), 400);
         }
         // Cu `batch` trimis, „retry" reia DOAR articolele cu eroare din lotul acela

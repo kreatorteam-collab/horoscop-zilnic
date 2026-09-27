@@ -374,8 +374,10 @@ class HZ_Bulk {
     public function batch_status($batch = '', $with_items = true) {
         $items   = array();
         $pending = 0;
+        $held    = self::paused_batches();
         foreach ($this->queue() as $item) {
-            if ($item['s'] === 'pending' || $item['s'] === 'working') { $pending++; }
+            $isHeld = isset($item['b']) && isset($held[$item['b']]);
+            if (($item['s'] === 'pending' || $item['s'] === 'working') && !$isHeld) { $pending++; }
             if (!$with_items) { continue; }
             if ($batch !== '' && (!isset($item['b']) || $item['b'] !== $batch)) { continue; }
             $pid = (int) $item['post_id'];
@@ -410,6 +412,7 @@ class HZ_Bulk {
             'items'        => $items,
             'queue_pending'=> $pending,
             'stopped'      => (int) get_option('hzb_stopped', 0),
+            'batch_paused' => ($batch !== '' && isset($held[$batch])) ? 1 : 0,
             'paused'       => (string) get_option('hzb_paused_reason', ''),
             'paused_src'   => (string) get_option('hzb_paused_src', ''),
             'gap'          => (int) get_option('hzb_gap', 120),
@@ -421,6 +424,15 @@ class HZ_Bulk {
             'now'          => time(),
             'cron_off'     => (defined('DISABLE_WP_CRON') && DISABLE_WP_CRON) ? 1 : 0,
         );
+    }
+
+    /** Loturile puse pe pauză din panou: [cheie lot => momentul pauzei]. Citit din DB, ca și coada. */
+    public static function paused_batches() {
+        global $wpdb;
+        wp_cache_delete('hzb_paused_batches', 'options');
+        $raw = $wpdb->get_var($wpdb->prepare("SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", 'hzb_paused_batches'));
+        $v = $raw ? maybe_unserialize($raw) : array();
+        return is_array($v) ? $v : array();
     }
 
     /** Comenzi din panoul central: start / stop / retry / clear (doar ce nu e în lucru). */
@@ -467,6 +479,23 @@ class HZ_Bulk {
                 delete_option('hzb_paused_src');
                 return 'Coada a fost golită.';
 
+            // v3.48.0: pauză PE LOT. „stop" oprește tot site-ul, deci orice lot nou
+            // trimis cu „Pornește coada" repornea și lotul pus pe pauză. Aici doar
+            // articolele lotului ăstuia stau; celelalte loturi merg mai departe.
+            case 'pause_batch':
+                if ($batch === '') { return 'Lipsește lotul.'; }
+                $held = self::paused_batches();
+                $held[$batch] = time();
+                update_option('hzb_paused_batches', $held, 'no');
+                return 'Lotul a fost pus pe pauză.';
+            case 'resume_batch':
+                if ($batch === '') { return 'Lipsește lotul.'; }
+                $held = self::paused_batches();
+                unset($held[$batch]);
+                update_option('hzb_paused_batches', $held, 'no');
+                $this->kick();
+                return 'Lotul a fost repornit.';
+
             // Anularea UNUI lot (butonul „Șterge" din panoul central): scoate din coadă
             // doar articolele lotului care nu sunt în lucru. Spre deosebire de „clear",
             // nu atinge loturile celorlalte comenzi care împart același site.
@@ -482,6 +511,8 @@ class HZ_Bulk {
                     $n++;
                 }
                 $this->save_queue($q);
+                $held = self::paused_batches();
+                if (isset($held[$batch])) { unset($held[$batch]); update_option('hzb_paused_batches', $held, 'no'); }
                 return $working > 0
                     ? sprintf('Lot anulat: %d articole scoase din coadă; 1 era în lucru și se termină.', $n)
                     : sprintf('Lot anulat: %d articole scoase din coadă.', $n);
@@ -735,7 +766,10 @@ class HZ_Bulk {
 
         $q    = $this->queue();
         $cand = array();
+        $held = self::paused_batches();
         foreach ($q as $i => $item) {
+            // v3.48.0: lot pus pe pauză din panou -> articolele lui stau, restul merg.
+            if (isset($item['b']) && isset($held[$item['b']])) { continue; }
             if ($item['s'] === 'pending') { $cand[] = $i; continue; }
             // v3.4.8: un item „working" se reia DOAR dacă e vechi. Înainte îl reluam
             // imediat, presupunând că rularea anterioară a murit — dar de cele mai
