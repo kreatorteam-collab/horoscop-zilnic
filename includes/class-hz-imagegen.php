@@ -55,8 +55,9 @@ class HZ_ImageGen {
         return array();
     }
 
+    /** Cheia modulului „imagini" (cheia dedicata, daca e setata; altfel cea implicita). */
     public static function has_key() {
-        return class_exists('CW_API') && CW_API::openai_key() !== '';
+        return class_exists('CW_API') && CW_API::openai_key_for('imagini') !== '';
     }
 
     /** Modelul de imagini (setabil remote prin hz/v1/settings), implicit gpt-image-2. */
@@ -199,7 +200,7 @@ class HZ_ImageGen {
         if (!self::has_key()) {
             return new WP_Error('hzig_key', 'Cheia OpenAI nu e configurată pentru generarea de imagini.');
         }
-        $key    = CW_API::openai_key();
+        $key    = CW_API::openai_key_for('imagini');
         $prompt = self::build_prompt($keywords, $style);
 
         $payload = array(

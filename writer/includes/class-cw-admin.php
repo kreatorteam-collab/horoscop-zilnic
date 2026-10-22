@@ -24,9 +24,10 @@ class CW_Admin {
         };
         add_filter('pre_update_option_cw_api_key', $encrypt_on_save, 10, 2);
         add_filter('pre_update_option_cw_openai_api_key', $encrypt_on_save, 10, 2);
-        // Chei OpenAI per modul (horoscop / vreme) — aceeasi criptare la salvare.
+        // Chei OpenAI per modul (horoscop / vreme / imagini) — aceeasi criptare la salvare.
         add_filter('pre_update_option_cw_openai_key_horoscope', $encrypt_on_save, 10, 2);
         add_filter('pre_update_option_cw_openai_key_weather', $encrypt_on_save, 10, 2);
+        add_filter('pre_update_option_cw_openai_key_images', $encrypt_on_save, 10, 2);
     }
 
     public function menu() {

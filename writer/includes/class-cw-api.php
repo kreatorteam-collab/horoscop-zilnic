@@ -23,9 +23,9 @@ class CW_API {
     }
 
     public static function openai_key() {
-        // Cheie OpenAI PER MODUL: horoscopul si vremea pot avea cheia lor, ca sa se
-        // vada separat consumul in dashboard-ul OpenAI. Restul (bulk, editor, refresh,
-        // produse, imagini) folosesc cheia implicita. Context gol sau cheie de modul
+        // Cheie OpenAI PER MODUL: horoscopul, vremea si imaginile pot avea cheia lor, ca
+        // sa se vada separat consumul in dashboard-ul OpenAI. Restul (bulk, editor,
+        // refresh, produse) folosesc cheia implicita. Context gol sau cheie de modul
         // lipsa => cade pe cheia implicita, deci generarea nu se opreste niciodata.
         $ctx = class_exists('CW_Usage') ? CW_Usage::context() : '';
         $per_ctx = '';
@@ -33,9 +33,20 @@ class CW_API {
             $per_ctx = trim((string) CW_Crypto::decrypt(get_option('cw_openai_key_horoscope', '')));
         } elseif ($ctx === 'vreme') {
             $per_ctx = trim((string) CW_Crypto::decrypt(get_option('cw_openai_key_weather', '')));
+        } elseif ($ctx === 'imagini') {
+            // Pozele AI + micro-apelurile pentru poze (interogari si alegere stoc Magnific).
+            $per_ctx = trim((string) CW_Crypto::decrypt(get_option('cw_openai_key_images', '')));
         }
         if ($per_ctx !== '') { return $per_ctx; }
         return trim((string) CW_Crypto::decrypt(get_option('cw_openai_api_key', '')));
+    }
+
+    /** Cheia OpenAI a unui modul anume (ex. 'imagini'), oricare ar fi contextul curent. */
+    public static function openai_key_for($ctx) {
+        if (!class_exists('CW_Usage')) { return self::openai_key(); }
+        return CW_Usage::with_context($ctx, function () {
+            return self::openai_key();
+        });
     }
 
     /** Amprenta (ultimele 4 caractere) a cheii dintr-un context, pentru verificare la distanta. */

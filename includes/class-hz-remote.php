@@ -171,6 +171,7 @@ class HZ_Remote {
                 'implicit' => CW_API::openai_key_last4(''),
                 'horoscop' => CW_API::openai_key_last4('horoscop'),
                 'vreme'    => CW_API::openai_key_last4('vreme'),
+                'imagini'  => CW_API::openai_key_last4('imagini'),
             ) : array(),
             'ai_openai'       => class_exists('CW_API') && CW_API::has_provider_key('openai'),
             'ai_anthropic'    => class_exists('CW_API') && CW_API::has_provider_key('anthropic'),
@@ -344,7 +345,8 @@ class HZ_Remote {
 
     /**
      * Suprascrie setările site-ului din panoul central.
-     * Body: { set: { openai_key, anthropic_key, magnific_key, model, monthly_limit,
+     * Body: { set: { openai_key, openai_key_horoscope, openai_key_weather, openai_key_images,
+     *                anthropic_key, magnific_key, model, monthly_limit,
      *                magnific_daily_limit, images, length, gap },
      *         clear: [ 'magnific_key', ... ] }
      *
@@ -370,6 +372,7 @@ class HZ_Remote {
             'openai_key'           => 'cw_openai_api_key',
             'openai_key_horoscope' => 'cw_openai_key_horoscope',
             'openai_key_weather'   => 'cw_openai_key_weather',
+            'openai_key_images'    => 'cw_openai_key_images',
             'anthropic_key'        => 'cw_api_key',
             'magnific_key'         => 'hzb_magnific_key',
         );
