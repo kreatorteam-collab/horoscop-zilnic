@@ -229,9 +229,14 @@ class HZ_News {
     private function process($section, $test) {
         // Câteva încercări: un articol video / live / prea scurt se sare și trecem la următorul.
         $tries = 0;
+        $fetched = 0;
+        // v3.51.9: cu categoria pe „automat", știrile care nu se potrivesc cu nicio
+        // categorie existentă a site-ului se sar (cerința userului) — decizia vine dintr-un
+        // apel scurt ÎNAINTE de rescriere, ca să nu plătim rescrieri aruncate.
+        $auto = (int) get_option('hzn_cat_' . $section, 0) === 0 && self::site_categories();
         foreach ($this->candidates($section) as $url) {
             if ($this->seen($url)) { continue; }
-            if (++$tries > 4) { break; }
+            if ($tries >= 4 || ++$fetched > 12) { break; }
 
             $art = $this->fetch_article($url);
             if (is_wp_error($art)) {
@@ -243,7 +248,21 @@ class HZ_News {
                 continue;
             }
 
-            $rw = $this->rewrite($art);
+            $cat = '';
+            if ($auto) {
+                $cat = $this->classify($art);
+                if (is_wp_error($cat)) {
+                    if (in_array($cat->get_error_code(), array('cw_no_key', 'cw_limit', 'cw_api', 'cw_http'), true)) { return $cat; }
+                    $cat = '';
+                }
+                if ($cat === '') {
+                    $this->mark_seen($url, 'fara_categorie');
+                    continue;
+                }
+            }
+
+            $tries++;
+            $rw = $this->rewrite($art, $cat);
             if (is_wp_error($rw)) {
                 // Eroare de API (cheie, cotă, rețea): NU marcăm articolul, îl reluăm data viitoare.
                 if (in_array($rw->get_error_code(), array('cw_no_key', 'cw_limit', 'cw_api', 'cw_http'), true)) {
@@ -485,13 +504,45 @@ class HZ_News {
         return $model;
     }
 
-    private function rewrite($art) {
+    /**
+     * Categoria existentă a site-ului în care se potrivește știrea, sau '' dacă nu se
+     * potrivește clar în niciuna. Apel scurt: titlu + începutul textului.
+     */
+    private function classify($art) {
+        $cats = self::site_categories();
+        if (!$cats) { return ''; }
+        $model  = self::effective_model();
+        $prompt = "Știre:\nTITLU: " . $art['title'] . "\nÎNCEPUT: " . mb_substr($art['text'], 0, 700)
+                . "\n\nCategoriile site-ului: " . implode(' | ', $cats)
+                . "\n\nÎn ce categorie a site-ului se potrivește CLAR această știre? Răspunde DOAR cu numele categoriei, scris exact ca în listă, "
+                . "sau cu NICIUNA dacă știrea nu ține de niciuna (nu forța o potrivire cu o categorie generală).";
+        $system   = 'Ești editor și clasifici știri pe rubricile unui site. Răspunzi cu un singur nume de categorie sau NICIUNA, fără alt text.';
+        $override = function () use ($system) { return $system; };
+        add_filter('cw_system_prompt', $override);
+        try {
+            $r = CW_Usage::with_context('stiri', function () use ($model, $prompt) {
+                return CW_API::no_web(function () use ($model, $prompt) {
+                    return CW_API::generate($model, $prompt, 2000);
+                });
+            });
+        } finally {
+            remove_filter('cw_system_prompt', $override);
+        }
+        if (is_wp_error($r)) { return $r; }
+        $ans = mb_strtolower(remove_accents(trim(wp_strip_all_tags((string) $r['text']), " \t\n\r\"'„”.«»")));
+        foreach ($cats as $c) {
+            if (mb_strtolower(remove_accents($c)) === $ans) { return $c; }
+        }
+        return '';
+    }
+
+    private function rewrite($art, $cat = '') {
         $model = self::effective_model();
 
         $system   = self::system_prompt();
         $override = function () use ($system) { return $system; };
         $prompt   = "TITLUL ORIGINAL: " . $art['title'] . "\n\nTEXTUL ORIGINAL:\n" . $art['text'];
-        $cats     = self::site_categories();
+        $cats     = $cat === '' ? self::site_categories() : array();
         if ($cats) {
             $prompt .= "\n\nCATEGORIILE SITE-ULUI (pentru „categorie” alegi UNA, scrisă exact ca aici): " . implode(' | ', $cats);
         }
@@ -545,7 +596,7 @@ class HZ_News {
             'entity'    => isset($j['imagine_subiect']) ? trim(wp_strip_all_tags((string) $j['imagine_subiect'])) : '',
             'img_en'    => isset($j['imagine_en']) ? trim(wp_strip_all_tags((string) $j['imagine_en'])) : '',
             'excerpt'   => isset($j['rezumat']) ? trim(wp_strip_all_tags((string) $j['rezumat'])) : '',
-            'category'  => isset($j['categorie']) ? trim(wp_strip_all_tags((string) $j['categorie'])) : '',
+            'category'  => $cat !== '' ? $cat : (isset($j['categorie']) ? trim(wp_strip_all_tags((string) $j['categorie'])) : ''),
             'model'     => $model,
             'cost'      => isset($result['cost']) ? (float) $result['cost'] : 0.0,
         );
