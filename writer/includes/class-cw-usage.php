@@ -14,7 +14,7 @@ class CW_Usage {
 
     /** Etichetele recunoscute, în ordinea în care le arătăm în rapoarte. */
     public static function contexts() {
-        return array('bulk', 'review', 'imagini', 'horoscop', 'vreme', 'rewrite', 'editor', 'altele');
+        return array('bulk', 'review', 'imagini', 'stiri', 'horoscop', 'vreme', 'rewrite', 'editor', 'altele');
     }
 
     public static function context() {

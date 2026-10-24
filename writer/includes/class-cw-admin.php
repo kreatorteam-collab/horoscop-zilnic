@@ -95,7 +95,7 @@ class CW_Admin {
     public function render_page() {
         if (!current_user_can('manage_options')) { return; }
 
-        $allowed  = array('writer', 'horoscop', 'vreme', 'bulk');
+        $allowed  = array('writer', 'horoscop', 'vreme', 'bulk', 'stiri');
         $tab      = (isset($_GET['tab']) && in_array($_GET['tab'], $allowed, true)) ? $_GET['tab'] : 'writer';
         $base_url = admin_url('options-general.php?page=claude-writer');
         ?>
@@ -107,6 +107,7 @@ class CW_Admin {
                 <a href="<?php echo esc_url($base_url . '&tab=horoscop'); ?>" class="nav-tab <?php echo $tab === 'horoscop' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Horoscop Zilnic', 'claude-writer'); ?></a>
                 <a href="<?php echo esc_url($base_url . '&tab=vreme'); ?>" class="nav-tab <?php echo $tab === 'vreme' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Vreme', 'claude-writer'); ?></a>
                 <a href="<?php echo esc_url($base_url . '&tab=bulk'); ?>" class="nav-tab <?php echo $tab === 'bulk' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Articole Bulk', 'claude-writer'); ?></a>
+                <a href="<?php echo esc_url($base_url . '&tab=stiri'); ?>" class="nav-tab <?php echo $tab === 'stiri' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Știri', 'claude-writer'); ?></a>
             </h2>
 
         <?php
@@ -127,6 +128,13 @@ class CW_Admin {
         if ($tab === 'bulk') {
             if (class_exists('HZ_Admin')) {
                 (new HZ_Admin())->render_bulk_tab();
+            }
+            echo '</div>';
+            return;
+        }
+        if ($tab === 'stiri') {
+            if (class_exists('HZ_News')) {
+                (new HZ_News())->render_tab();
             }
             echo '</div>';
             return;

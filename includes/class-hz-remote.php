@@ -203,6 +203,12 @@ class HZ_Remote {
             'weather_hour'    => (int) get_option('hzw_hour', 8),
             'weather_last'    => (string) get_option('hzw_last_run', ''),
             'weather_model'   => (string) get_option('hzw_model', ''),
+            // v3.50.0: modulul Știri (digi24 rescris).
+            'news_on'         => (int) get_option('hzn_enabled', 0),
+            'news_per_cat'    => (int) get_option('hzn_per_cat', 5),
+            'news_model'      => (string) get_option('hzn_model', ''),
+            'news_last'       => (string) get_option('hzn_last_run', ''),
+            'news_error'      => (string) get_option('hzn_last_error', ''),
             'ai_month_cost'   => class_exists('CW_Usage') ? round((float) CW_Usage::month_cost(), 4) : 0,
             'ai_month_limit'  => (float) get_option('cw_monthly_cost_limit', 0),
             'web_search'      => (int) get_option('cw_web_search', 0),
@@ -467,6 +473,21 @@ class HZ_Remote {
             }
             update_option($option, $value, 'no');
             $changed[] = $field;
+        }
+
+        // Modulul Știri: pornit/oprit (0/1 explicit, ca la căutarea web), câte pe secțiune, modelul.
+        if (isset($set['news_enabled']) && $set['news_enabled'] !== '') {
+            update_option('hzn_enabled', (int) !!$set['news_enabled'], 'no');
+            $changed[] = 'news_enabled';
+        }
+        if (isset($set['news_per_cat']) && $set['news_per_cat'] !== '') {
+            update_option('hzn_per_cat', max(1, min(30, (int) $set['news_per_cat'])), 'no');
+            $changed[] = 'news_per_cat';
+        }
+        if (isset($set['news_model']) && trim((string) $set['news_model']) !== '') {
+            $nm = sanitize_text_field((string) $set['news_model']);
+            if (CW_Models::exists($nm)) { update_option('hzn_model', $nm, 'no'); $changed[] = 'news_model'; }
+            else { $skipped[] = 'news_model necunoscut: ' . $nm; }
         }
 
         // Căutarea web e un comutator: 0/1 explicit (nu „gol = neatins", altfel n-ai
