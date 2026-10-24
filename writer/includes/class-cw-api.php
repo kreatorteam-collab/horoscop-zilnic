@@ -14,6 +14,21 @@ class CW_API {
     // Căutarea web la OpenAI merge DOAR pe Responses API (Chat Completions respinge
     // orice parametru de search — verificat live pe gpt-5.4-mini: „Unknown parameter").
     const OPENAI_RESPONSES = 'https://api.openai.com/v1/responses';
+    const OPENAI_BASE      = 'https://api.openai.com/v1';
+
+    /**
+     * v3.51.0: serverul API pentru modelele GPT e configurabil (`cw_openai_base`), ca să
+     * poată merge printr-un gateway compatibil OpenAI (ex. https://api.ns.fm/v1).
+     * Gol = OpenAI direct. Se aplică la text, căutare web și imagini.
+     */
+    public static function openai_base() {
+        $b = trim((string) get_option('cw_openai_base', ''));
+        return $b !== '' && preg_match('#^https://#i', $b) ? rtrim($b, '/') : self::OPENAI_BASE;
+    }
+
+    public static function openai_url($path) {
+        return self::openai_base() . '/' . ltrim($path, '/');
+    }
 
     /* ---- Chei ---- */
 
@@ -309,7 +324,7 @@ class CW_API {
             if (!empty($mm['effort'])) { $payload['reasoning'] = array('effort' => 'low'); }
         }
 
-        $response = wp_remote_post(self::OPENAI_RESPONSES, array(
+        $response = wp_remote_post(self::openai_url('responses'), array(
             'headers' => self::openai_headers(),
             'body'    => wp_json_encode($payload),
             'timeout' => 300, // căutările adaugă zeci de secunde
@@ -607,7 +622,7 @@ class CW_API {
                 $payload['reasoning_effort'] = 'low';
             }
 
-            $response = wp_remote_post(self::OPENAI_ENDPOINT, array(
+            $response = wp_remote_post(self::openai_url('chat/completions'), array(
                 'headers' => self::openai_headers(),
                 'body'    => wp_json_encode($payload),
                 'timeout' => 180,

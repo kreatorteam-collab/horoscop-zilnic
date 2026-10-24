@@ -240,7 +240,7 @@ class CW_Rest {
                 'usage'  => array(),
             );
 
-            $ch = curl_init(CW_API::OPENAI_ENDPOINT);
+            $ch = curl_init(CW_API::openai_url('chat/completions'));
             curl_setopt($ch, CURLOPT_POST, true);
             curl_setopt($ch, CURLOPT_HTTPHEADER, array(
                 'Authorization: Bearer ' . CW_API::openai_key(),

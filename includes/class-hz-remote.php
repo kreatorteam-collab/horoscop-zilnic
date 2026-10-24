@@ -174,6 +174,7 @@ class HZ_Remote {
                 'imagini'  => CW_API::openai_key_last4('imagini'),
             ) : array(),
             'ai_openai'       => class_exists('CW_API') && CW_API::has_provider_key('openai'),
+            'openai_base'     => class_exists('CW_API') ? CW_API::openai_base() : '',
             'ai_anthropic'    => class_exists('CW_API') && CW_API::has_provider_key('anthropic'),
             'ai_limit_hit'    => class_exists('CW_Usage') ? CW_Usage::limit_reached() : false,
             'ai_model'        => class_exists('CW_API') ? CW_API::resolve_model('') : '',
@@ -488,6 +489,20 @@ class HZ_Remote {
             $nm = sanitize_text_field((string) $set['news_model']);
             if (CW_Models::exists($nm)) { update_option('hzn_model', $nm, 'no'); $changed[] = 'news_model'; }
             else { $skipped[] = 'news_model necunoscut: ' . $nm; }
+        }
+
+        // Serverul API pentru GPT (gateway compatibil OpenAI). 'openai' / 'default' = OpenAI direct.
+        if (isset($set['openai_base']) && trim((string) $set['openai_base']) !== '') {
+            $base = trim((string) $set['openai_base']);
+            if (in_array(strtolower($base), array('openai', 'default'), true)) {
+                delete_option('cw_openai_base');
+                $changed[] = 'openai_base';
+            } elseif (preg_match('#^https://[^\s]+$#i', $base)) {
+                update_option('cw_openai_base', esc_url_raw(rtrim($base, '/')), 'no');
+                $changed[] = 'openai_base';
+            } else {
+                $skipped[] = 'openai_base invalid: ' . $base;
+            }
         }
 
         // Căutarea web e un comutator: 0/1 explicit (nu „gol = neatins", altfel n-ai
