@@ -12,7 +12,8 @@ if (!defined('ABSPATH')) { exit; }
  *   formularea devine „conform digi24.ro";
  * - pozele digi24 NU se preiau (sunt licențiate agențiilor: Profimedia, Inquam...).
  *   Coverul vine din Wikimedia Commons sau Openverse (licențe libere, cu creditul
- *   autorului, doar dacă subiectul e o persoană/un loc anume), altfel e o imagine
+ *   autorului doar ca legendă în Media, nu în text — deci doar CC0 / domeniu public;
+ *   și doar dacă subiectul e o persoană/un loc anume), altfel e o imagine
  *   AI generată de la zero din subiect;
  * - pornit implicit DOAR pe comunicateinpresa.ro și revistabravo.ro (vezi
  *   default_hosts()); pe restul flotei modulul există, dar e oprit.
@@ -586,11 +587,8 @@ TXT;
             } else {
                 set_post_thumbnail($post_id, $img['id']);
                 $img_note = $img['source'];
-                if ($img['credit'] !== '') {
-                    // Tema nu afișează legenda coverului, deci creditul (cerut de licență) intră în text.
-                    $credit = '<p class="hz-photo-credit"><em>' . esc_html($img['credit']) . '</em></p>';
-                    wp_update_post(array('ID' => $post_id, 'post_content' => wp_slash($rw['content'] . "\n" . $credit)));
-                }
+                // v3.50.2: fără credit în text (cerința userului). De aceea license_ok()
+                // acceptă doar licențe care NU cer atribuire; creditul rămâne ca legendă în Media.
             }
         }
         update_post_meta($post_id, '_hzn_image', $img_note);
@@ -652,8 +650,12 @@ TXT;
         return true;
     }
 
+    /**
+     * Doar licențe fără obligație de atribuire (CC0, domeniu public): creditul nu se
+     * mai afișează în articol, iar CC BY / CC BY-SA l-ar cere.
+     */
     private function license_ok($lic) {
-        return (bool) preg_match('/^(cc0|cc[ -]by(-sa)?( \d(\.\d)?)?|public domain|pd|pdm|by|by-sa)\b/i', trim((string) $lic));
+        return (bool) preg_match('/^(cc0|public domain|pd|pdm)\b/i', trim((string) $lic));
     }
 
     private function landscape($w, $h) {
@@ -790,7 +792,7 @@ TXT;
         $model = (string) get_option('hzn_model', self::DEFAULT_MODEL);
         ?>
             <p style="max-width:720px;">
-                <?php esc_html_e('Preia știri de pe digi24.ro (Actualitate, Politică, Economie, Externe), le rescrie complet cu AI și le publică pe categoria aleasă, întinse pe parcursul zilei. Fără sursă la final și fără linkuri. Pozele digi24 NU se preiau: coverul vine din Wikimedia Commons / Openverse (licență liberă, cu creditul autorului) sau e o imagine AI generată de la zero.', 'horoscop-zilnic'); ?>
+                <?php esc_html_e('Preia știri de pe digi24.ro (Actualitate, Politică, Economie, Externe), le rescrie complet cu AI și le publică pe categoria aleasă, întinse pe parcursul zilei. Fără sursă la final și fără linkuri. Pozele digi24 NU se preiau: coverul vine din Wikimedia Commons / Openverse (doar CC0 / domeniu public, fără credit în articol) sau e o imagine AI generată de la zero.', 'horoscop-zilnic'); ?>
             </p>
             <p style="max-width:720px;">
                 <?php if (!$on) { echo '<strong>' . esc_html__('Preluarea automată este oprită.', 'horoscop-zilnic') . '</strong> '; } ?>
@@ -880,7 +882,7 @@ TXT;
                         <th scope="row"><?php esc_html_e('Imagine cover', 'horoscop-zilnic'); ?></th>
                         <td>
                             <input type="hidden" name="hzn_images" value="0" />
-                            <label><input type="checkbox" name="hzn_images" value="1" <?php checked(1, (int) get_option('hzn_images', 1)); ?> /> <?php esc_html_e('Wikimedia Commons / Openverse (licență liberă, cu credit), altfel imagine AI (~$0,05)', 'horoscop-zilnic'); ?></label>
+                            <label><input type="checkbox" name="hzn_images" value="1" <?php checked(1, (int) get_option('hzn_images', 1)); ?> /> <?php esc_html_e('Wikimedia Commons / Openverse (CC0 / domeniu public), altfel imagine AI (~$0,05)', 'horoscop-zilnic'); ?></label>
                         </td>
                     </tr>
                     <tr>
