@@ -9,7 +9,8 @@ if (!defined('ABSPATH')) { exit; }
  * Regulile cerute de user (24.10.2026):
  * - textul se scrie de la zero (alt titlu, altă structură), fără „Sursa" la final
  *   și fără niciun link; dacă originalul atribuie informația chiar lui Digi24,
- *   formularea devine „conform digi24.ro";
+ *   formularea devine „conform digi24.ro"; v3.50.3: primul paragraf se încheie cu
+ *   „conform digi24.ro", link nofollow către știrea originală (cerința userului);
  * - pozele digi24 NU se preiau (sunt licențiate agențiilor: Profimedia, Inquam...).
  *   Coverul vine din Wikimedia Commons sau Openverse (licențe libere, cu creditul
  *   autorului doar ca legendă în Media, nu în text — deci doar CC0 / domeniu public;
@@ -478,6 +479,7 @@ class HZ_News {
 
         $bad = $this->reject_reason($art, $title, $content);
         if ($bad !== '') { return new WP_Error('hzn_reject', $bad); }
+        $content = $this->source_link($content, $art['url']);
 
         return array(
             'title'     => $title,
@@ -502,6 +504,19 @@ class HZ_News {
         // Paragraful de „Sursa" la final nu se pune (cerința userului), chiar dacă îl scrie modelul.
         $html = preg_replace('#<p>\s*(?:<(?:em|strong)>)?\s*surs[aă]\s*:.*?</p>\s*$#isu', '', $html);
         return trim($html);
+    }
+
+    /**
+     * v3.50.3: atribuirea din primul paragraf („conform digi24.ro") devine link nofollow
+     * către știrea originală, ca la Gândul / Observator. Dacă modelul a uitat-o, o
+     * adăugăm noi la finalul primului paragraf.
+     */
+    private function source_link($content, $url) {
+        $a = '<a href="' . esc_url($url) . '" target="_blank" rel="nofollow noopener">digi24.ro</a>';
+        $n = 0;
+        $content = preg_replace('/\bdigi24\.ro\b/iu', $a, $content, 1, $n);
+        if ($n > 0) { return $content; }
+        return preg_replace('#\.?\s*</p>#u', ', conform ' . $a . '.</p>', $content, 1);
     }
 
     /** Motivul pentru care rescrierea nu se publică ('' = e bună). */
@@ -539,7 +554,7 @@ REGULI DE CONȚINUT
 - Păstrezi exact faptele: nume, funcții, cifre, date, locuri, ce s-a întâmplat. NU inventa nimic și nu adăuga informații care nu sunt în text.
 - Declarațiile pot rămâne citate scurte, între ghilimele românești („…"), atribuite persoanei care le-a făcut.
 - Scrii de la zero: alt titlu, alt început, altă ordine a ideilor, alte fraze. Nu reformula textul frază cu frază și nu copia propoziții din original.
-- Dacă originalul atribuie o informație chiar redacției Digi24 (ex. „surse Digi24", „a declarat pentru Digi24", „a aflat Digi24"), scrii „conform digi24.ro". Altfel NU pomenești digi24 deloc.
+- Primul paragraf se încheie firesc cu atribuirea „conform digi24.ro" (ex. „…, conform digi24.ro."), scrisă EXACT așa, o singură dată în tot articolul. Linkul îl adaugă sistemul.
 - Nu pui sursa la final, nu pui linkuri, nu pui adrese web, nu pui credite foto.
 
 STIL
@@ -792,7 +807,7 @@ TXT;
         $model = (string) get_option('hzn_model', self::DEFAULT_MODEL);
         ?>
             <p style="max-width:720px;">
-                <?php esc_html_e('Preia știri de pe digi24.ro (Actualitate, Politică, Economie, Externe), le rescrie complet cu AI și le publică pe categoria aleasă, întinse pe parcursul zilei. Fără sursă la final și fără linkuri. Pozele digi24 NU se preiau: coverul vine din Wikimedia Commons / Openverse (doar CC0 / domeniu public, fără credit în articol) sau e o imagine AI generată de la zero.', 'horoscop-zilnic'); ?>
+                <?php esc_html_e('Preia știri de pe digi24.ro (Actualitate, Politică, Economie, Externe), le rescrie complet cu AI și le publică pe categoria aleasă, întinse pe parcursul zilei. Sursa apare în primul paragraf („conform digi24.ro”, link nofollow către știrea originală). Pozele digi24 NU se preiau: coverul vine din Wikimedia Commons / Openverse (doar CC0 / domeniu public, fără credit în articol) sau e o imagine AI generată de la zero.', 'horoscop-zilnic'); ?>
             </p>
             <p style="max-width:720px;">
                 <?php if (!$on) { echo '<strong>' . esc_html__('Preluarea automată este oprită.', 'horoscop-zilnic') . '</strong> '; } ?>
