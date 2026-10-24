@@ -212,7 +212,11 @@ class HZ_ImageGen {
             'n'       => 1,
         );
 
-        $resp = wp_remote_post(class_exists('CW_API') ? CW_API::openai_url('images/generations') : self::ENDPOINT, array(
+        // v3.51.4: cu cheie dedicată pentru imagini, mergem la OpenAI direct (serverele
+        // compatibile, ex. api.ns.fm, pot să nu aibă generare de imagini); altfel prin
+        // serverul API configurat.
+        $direct = trim((string) get_option('cw_openai_key_images', '')) !== '';
+        $resp = wp_remote_post(($direct || !class_exists('CW_API')) ? self::ENDPOINT : CW_API::openai_url('images/generations'), array(
             'headers' => array(
                 'Content-Type'  => 'application/json',
                 'Authorization' => 'Bearer ' . $key,

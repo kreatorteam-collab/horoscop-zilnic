@@ -77,6 +77,7 @@ class CW_Admin {
             'cw_api_key'            => 'cw_sanitize_key',
             'cw_openai_api_key'     => 'cw_sanitize_key',
             'cw_openai_base'        => 'esc_url_raw',
+            'cw_openai_key_images'  => 'cw_sanitize_key',
             'cw_default_model'      => 'sanitize_text_field',
             'cw_effort'             => 'sanitize_text_field',
             'cw_temperature'        => 'cw_sanitize_float',
@@ -253,6 +254,10 @@ class CW_Admin {
                             <label class="cw-label" for="cw_openai_base"><?php esc_html_e('Server API pentru modelele GPT (opțional)', 'claude-writer'); ?></label>
                             <input type="url" name="cw_openai_base" id="cw_openai_base" class="widefat"
                                 value="<?php echo esc_attr(get_option('cw_openai_base', '')); ?>" placeholder="https://api.openai.com/v1" />
+                            <label class="cw-label" for="cw_openai_key_images" style="margin-top:10px;"><?php esc_html_e('Cheie OpenAI pentru imagini AI (opțional)', 'claude-writer'); ?></label>
+                            <input type="text" name="cw_openai_key_images" id="cw_openai_key_images" class="widefat" value="" autocomplete="off" readonly onfocus="this.removeAttribute('readonly');"
+                                placeholder="<?php echo trim((string) get_option('cw_openai_key_images', '')) !== '' ? esc_attr__('configurată — lipește o cheie nouă doar dacă vrei s-o schimbi', 'claude-writer') : 'sk-proj-...'; ?>" />
+                            <span class="cw-muted" style="display:block;margin-top:4px;"><?php esc_html_e('Pusă aici, imaginile AI (colajele) se generează la OpenAI direct, chiar dacă textul merge prin alt server.', 'claude-writer'); ?></span>
                             <span class="cw-muted" style="display:block;margin-top:4px;"><?php esc_html_e('Gol = OpenAI direct. Pentru un server compatibil OpenAI (ex. https://api.ns.fm/v1) pune adresa lui, iar mai sus cheia primită de la el. Se folosește pentru text, căutare web și imagini.', 'claude-writer'); ?></span>
                         </p>
                         <p>
