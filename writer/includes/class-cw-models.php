@@ -13,9 +13,30 @@ class CW_Models {
      * creator.ms / api.ns.fm), salvate de butonul „Vezi modelele disponibile". Apar în
      * dropdown-uri într-un grup separat; prețul nu-l știm, deci costul lor e 0 în rapoarte.
      */
+    /**
+     * Modelele publicate de creator.ms pentru api.ns.fm (pagina „AI API", 24.10.2026).
+     * Toate sunt „THINKING", deci acceptă reasoning_effort (minimal/low/medium/high).
+     * Se adaugă peste ce întoarce GET /models, în caz că serverul nu le listează.
+     */
+    public static function ns_fm_models() {
+        return array(
+            'cx/gpt-6-luna', 'cx/gpt-6-astra', 'cx/gpt-6.1-sol',
+            'cc/claude-haiku-5-5', 'cc/claude-sonnet-5-5', 'cc/claude-opus-5-5',
+            'ag/gemini-3.8-flash', 'ag/gemini-3.8-flash-low', 'ag/gemini-3.8-flash-medium', 'ag/gemini-3.8-flash-high',
+            'gemini-3.5-flash-lite', 'google/gemini-4-argon',
+        );
+    }
+
     public static function gateway() {
-        $ids = get_option('cw_gateway_models', array());
-        if (!is_array($ids) || trim((string) get_option('cw_openai_base', '')) === '') { return array(); }
+        $base = trim((string) get_option('cw_openai_base', ''));
+        $ids  = get_option('cw_gateway_models', array());
+        if ($base === '') { return array(); }
+        if (!is_array($ids)) { $ids = array(); }
+        $thinking = array();
+        if (stripos((string) wp_parse_url($base, PHP_URL_HOST), 'ns.fm') !== false) {
+            $thinking = self::ns_fm_models();
+            $ids = array_merge($thinking, $ids);
+        }
         $out = array();
         $builtin = self::builtin(); // modelele cunoscute își păstrează eticheta și prețul
         foreach ($ids as $id) {
@@ -25,7 +46,7 @@ class CW_Models {
             $out[$id] = array(
                 'label' => $id, 'tagline' => 'Server API', 'desc' => 'Model de pe serverul API configurat.',
                 'provider' => 'openai', 'in' => 0.0, 'out' => 0.0,
-                'temperature' => false, 'effort' => false, 'badge' => 'server', 'gateway' => true,
+                'temperature' => false, 'effort' => in_array($id, $thinking, true), 'badge' => 'server', 'gateway' => true,
             );
         }
         return $out;

@@ -469,6 +469,13 @@ class HZ_News {
     private function rewrite($art) {
         $model = (string) get_option('hzn_model', self::DEFAULT_MODEL);
         if (!CW_Models::exists($model)) { $model = self::DEFAULT_MODEL; }
+        // v3.51.4: cu server API (ex. creator.ms) modelul trebuie să existe PE server;
+        // altfel cădem pe modelul implicit al site-ului (sau primul de pe server).
+        $gw = CW_Models::gateway();
+        if ($gw && CW_Models::provider($model) === 'openai' && !isset($gw[$model])) {
+            $def   = CW_Models::default_model();
+            $model = isset($gw[$def]) ? $def : (string) key($gw);
+        }
         $model = CW_API::resolve_model($model);
 
         $system   = self::system_prompt();
