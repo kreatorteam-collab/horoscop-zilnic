@@ -649,8 +649,10 @@ TXT;
         update_post_meta($post_id, self::META_SECTION, $section);
         update_post_meta($post_id, '_hzn_model', $rw['model']);
 
-        $img_note = 'fără imagine';
-        if ((int) get_option('hzn_images', 1)) {
+        $img_note = 'fără imagine (bifa „Imagine cover" e oprită)';
+        // v3.51.7: bifa „poza originală" pornește singură coverul, chiar dacă bifa
+        // generală „Imagine cover" e debifată (altfel ieșea „fără imagine" fără motiv).
+        if ((int) get_option('hzn_images', 1) || (int) get_option('hzn_source_photo', 0)) {
             $img = $this->cover($post_id, $rw, $art);
             if (is_wp_error($img)) {
                 $img_note = $img->get_error_message();
