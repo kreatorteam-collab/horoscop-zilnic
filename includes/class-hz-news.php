@@ -86,6 +86,7 @@ class HZ_News {
             'hzn_images'     => 1,
             'hzn_free_photos'=> 0,
             'hzn_source_photo'=> 0,
+            'hzn_nsi_banner' => 1,
             'hzn_max_age'    => 24,
             'hzn_rss_url'    => 'https://www.digi24.ro/rss',
         );
@@ -724,6 +725,11 @@ TXT;
                 }
             }
         }
+        // v3.52.0: bannerul Next Stage Image (același lucru ca butonul „Generează imagine"
+        // din editor): coverul pus în șablonul site-ului, cu titlul, salvat ca imagine socială.
+        if ($img_note !== '' && has_post_thumbnail($post_id) && (int) get_option('hzn_nsi_banner', 1)) {
+            $img_note .= ' · ' . $this->nsi_banner($post_id);
+        }
         update_post_meta($post_id, '_hzn_image', $img_note);
         update_option('hzn_last_image', current_time('H:i') . ' — ' . $img_note, 'no');
 
@@ -909,6 +915,30 @@ TXT;
         return (int) $id;
     }
 
+    /**
+     * Rulează generatorul pluginului Next Stage Image pentru articol și înregistrează
+     * rezultatul în tabela lui ({prefix}nsi_images), exact ca ajax_generate_image().
+     * Întoarce o notă scurtă pentru „Ultima imagine".
+     */
+    private function nsi_banner($post_id) {
+        if (!class_exists('Next_Stage_Image') || !method_exists('Next_Stage_Image', 'instance')) { return 'banner: Next Stage Image inactiv'; }
+        $nsi = Next_Stage_Image::instance();
+        if (empty($nsi->generator) || !method_exists($nsi->generator, 'generate_for_post')) { return 'banner: versiune Next Stage Image necunoscută'; }
+        global $wpdb;
+        $table = $wpdb->prefix . 'nsi_images';
+        if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table)) !== $table) { return 'banner: tabela Next Stage Image lipsește'; }
+
+        $r = $nsi->generator->generate_for_post($post_id);
+        if (is_wp_error($r)) { return 'banner: ' . $r->get_error_message(); }
+        if (empty($r['url'])) { return 'banner: răspuns gol'; }
+        $wpdb->replace($table, array(
+            'post_id'       => $post_id,
+            'attachment_id' => isset($r['attachment_id']) ? (int) $r['attachment_id'] : 0,
+            'url'           => (string) $r['url'],
+        ), array('%d', '%d', '%s'));
+        return 'banner';
+    }
+
     private function author_id() {
         $chosen = (int) get_option('hzn_author', 0);
         if ($chosen > 0 && user_can($chosen, 'publish_posts')) { return $chosen; }
@@ -958,7 +988,7 @@ TXT;
         $opts = array(
             'hzn_enabled' => 'absint', 'hzn_per_cat' => 'absint', 'hzn_start_hour' => 'absint',
             'hzn_end_hour' => 'absint', 'hzn_status' => 'sanitize_key', 'hzn_model' => 'sanitize_text_field',
-            'hzn_author' => 'absint', 'hzn_images' => 'absint', 'hzn_free_photos' => 'absint', 'hzn_source_photo' => 'absint', 'hzn_max_age' => 'absint', 'hzn_rss_url' => 'esc_url_raw',
+            'hzn_author' => 'absint', 'hzn_images' => 'absint', 'hzn_free_photos' => 'absint', 'hzn_source_photo' => 'absint', 'hzn_nsi_banner' => 'absint', 'hzn_max_age' => 'absint', 'hzn_rss_url' => 'esc_url_raw',
         );
         foreach (array_keys(self::sections()) as $key) {
             $opts['hzn_on_' . $key]  = 'absint';
@@ -1088,6 +1118,8 @@ TXT;
                             <label><input type="checkbox" name="hzn_images" value="1" <?php checked(1, (int) get_option('hzn_images', 1)); ?> /> <?php esc_html_e('Colaj AI generat din conținutul știrii (~$0,05)', 'horoscop-zilnic'); ?></label><br />
                             <input type="hidden" name="hzn_source_photo" value="0" />
                             <label><input type="checkbox" name="hzn_source_photo" value="1" <?php checked(1, (int) get_option('hzn_source_photo', 0)); ?> /> <?php esc_html_e('Folosește poza originală a știrii, cu creditul sursei („Foto: …”), pe răspunderea ta: pozele de agenție (Profimedia, Inquam etc.) pot aduce facturi pentru drepturi de autor', 'horoscop-zilnic'); ?></label><br />
+                            <input type="hidden" name="hzn_nsi_banner" value="0" />
+                            <label><input type="checkbox" name="hzn_nsi_banner" value="1" <?php checked(1, (int) get_option('hzn_nsi_banner', 1)); ?> <?php disabled(!class_exists('Next_Stage_Image')); ?> /> <?php esc_html_e('Generează și imaginea Social Media cu banner (Next Stage Image), ca butonul „Generează imagine”', 'horoscop-zilnic'); ?><?php if (!class_exists('Next_Stage_Image')) { echo ' — ' . esc_html__('pluginul nu e activ pe site', 'horoscop-zilnic'); } ?></label><br />
                             <input type="hidden" name="hzn_free_photos" value="0" />
                             <label><input type="checkbox" name="hzn_free_photos" value="1" <?php checked(1, (int) get_option('hzn_free_photos', 0)); ?> /> <?php esc_html_e('Încearcă întâi Wikimedia / Openverse după numele persoanei (CC0; risc de poză cu altă persoană cu același nume)', 'horoscop-zilnic'); ?></label>
                         </td>
