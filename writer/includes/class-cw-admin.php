@@ -70,6 +70,7 @@ class CW_Admin {
         $opts = array(
             'cw_api_key'            => 'cw_sanitize_key',
             'cw_openai_api_key'     => 'cw_sanitize_key',
+            'cw_openai_base'        => 'esc_url_raw',
             'cw_default_model'      => 'sanitize_text_field',
             'cw_effort'             => 'sanitize_text_field',
             'cw_temperature'        => 'cw_sanitize_float',
@@ -232,6 +233,12 @@ class CW_Admin {
                             <?php elseif ($has_oai && !$is_enc_oai) : ?>
                                 <span class="cw-muted" style="display:block;margin-top:4px;">ℹ️ <?php esc_html_e('Cheia este stocată în clar (criptarea nu a fost posibilă pe acest server).', 'claude-writer'); ?></span>
                             <?php endif; ?>
+                        </p>
+                        <p>
+                            <label class="cw-label" for="cw_openai_base"><?php esc_html_e('Server API pentru modelele GPT (opțional)', 'claude-writer'); ?></label>
+                            <input type="url" name="cw_openai_base" id="cw_openai_base" class="widefat"
+                                value="<?php echo esc_attr(get_option('cw_openai_base', '')); ?>" placeholder="https://api.openai.com/v1" />
+                            <span class="cw-muted" style="display:block;margin-top:4px;"><?php esc_html_e('Gol = OpenAI direct. Pentru un server compatibil OpenAI (ex. https://api.ns.fm/v1) pune adresa lui, iar mai sus cheia primită de la el. Se folosește pentru text, căutare web și imagini.', 'claude-writer'); ?></span>
                         </p>
                         <p>
                             <label class="cw-label"><?php esc_html_e('Cheie API Anthropic (modelele Claude)', 'claude-writer'); ?></label>
@@ -401,7 +408,7 @@ class CW_Admin {
             wp_send_json_error(array('message' => __('Salvează întâi cheia, apoi testează.', 'claude-writer')));
         }
 
-        $response = wp_remote_post(CW_API::OPENAI_ENDPOINT, array(
+        $response = wp_remote_post(CW_API::openai_url('chat/completions'), array(
             'headers' => array(
                 'Authorization' => 'Bearer ' . $key,
                 'content-type'  => 'application/json',

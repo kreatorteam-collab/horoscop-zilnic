@@ -212,7 +212,7 @@ class HZ_ImageGen {
             'n'       => 1,
         );
 
-        $resp = wp_remote_post(self::ENDPOINT, array(
+        $resp = wp_remote_post(class_exists('CW_API') ? CW_API::openai_url('images/generations') : self::ENDPOINT, array(
             'headers' => array(
                 'Content-Type'  => 'application/json',
                 'Authorization' => 'Bearer ' . $key,
