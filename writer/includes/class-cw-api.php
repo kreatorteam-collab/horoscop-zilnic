@@ -26,6 +26,31 @@ class CW_API {
         return $b !== '' && preg_match('#^https://#i', $b) ? rtrim($b, '/') : self::OPENAI_BASE;
     }
 
+    /**
+     * Citește lista de modele de pe serverul GPT configurat și o salvează (pentru
+     * dropdown-uri). Returnează lista de ID-uri sau WP_Error.
+     */
+    public static function refresh_gateway_models() {
+        $key = self::openai_key();
+        if ($key === '') { return new WP_Error('cw_no_key', 'Salvează întâi cheia.'); }
+        $r = wp_remote_get(self::openai_url('models'), array('headers' => array('Authorization' => 'Bearer ' . $key), 'timeout' => 30));
+        if (is_wp_error($r)) { return $r; }
+        $code = (int) wp_remote_retrieve_response_code($r);
+        $body = json_decode(wp_remote_retrieve_body($r), true);
+        if ($code !== 200 || !isset($body['data']) || !is_array($body['data'])) {
+            $msg = isset($body['error']['message']) ? $body['error']['message'] : 'Serverul nu a întors lista de modele.';
+            return new WP_Error('cw_models', sprintf('(%d) %s', $code, $msg));
+        }
+        $ids = array();
+        foreach ($body['data'] as $m) {
+            if (is_array($m) && !empty($m['id'])) { $ids[] = sanitize_text_field((string) $m['id']); }
+        }
+        $ids = array_values(array_unique($ids));
+        sort($ids);
+        if (self::openai_base() !== self::OPENAI_BASE) { update_option('cw_gateway_models', $ids, 'no'); }
+        return $ids;
+    }
+
     public static function openai_url($path) {
         return self::openai_base() . '/' . ltrim($path, '/');
     }

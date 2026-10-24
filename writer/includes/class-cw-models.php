@@ -8,7 +8,39 @@ if (!defined('ABSPATH')) { exit; }
  */
 class CW_Models {
 
+    /**
+     * v3.51.2: modelele serverului GPT configurat (gateway compatibil OpenAI, ex.
+     * creator.ms / api.ns.fm), salvate de butonul „Vezi modelele disponibile". Apar în
+     * dropdown-uri într-un grup separat; prețul nu-l știm, deci costul lor e 0 în rapoarte.
+     */
+    public static function gateway() {
+        $ids = get_option('cw_gateway_models', array());
+        if (!is_array($ids) || trim((string) get_option('cw_openai_base', '')) === '') { return array(); }
+        $out = array();
+        $builtin = self::builtin(); // cele cunoscute rămân în grupul lor (cu prețuri); merg oricum prin server
+        foreach ($ids as $id) {
+            $id = (string) $id;
+            if ($id === '' || isset($out[$id]) || isset($builtin[$id])) { continue; }
+            $out[$id] = array(
+                'label' => $id, 'tagline' => 'Server API', 'desc' => 'Model de pe serverul API configurat.',
+                'provider' => 'openai', 'in' => 0.0, 'out' => 0.0,
+                'temperature' => false, 'effort' => false, 'badge' => 'server', 'gateway' => true,
+            );
+        }
+        return $out;
+    }
+
+    /** Eticheta grupului din dropdown pentru modelele gateway-ului (ex. „creator.ms (api.ns.fm)"). */
+    public static function gateway_label() {
+        $host = (string) wp_parse_url((string) get_option('cw_openai_base', ''), PHP_URL_HOST);
+        return 'creator.ms' . ($host !== '' ? ' (' . $host . ')' : '');
+    }
+
     public static function all() {
+        return self::builtin() + self::gateway();
+    }
+
+    public static function builtin() {
         return array(
             'gpt-5.6-sol' => array(
                 'label'    => 'GPT-5.6 Sol',
