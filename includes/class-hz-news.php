@@ -552,7 +552,7 @@ IEȘIRE: DOAR un obiect JSON valid, fără markdown, cu cheile:
   "titlu": "titlul nou",
   "continut": "HTML cu <p>, <h2>, <ul>, <li>, <strong> (fără <h1>, fără linkuri)",
   "rezumat": "o propoziție de maximum 160 de caractere pentru descriere",
-  "imagine_subiect": "numele propriu al persoanei, instituției sau locului central al știrii, așa cum s-ar căuta o fotografie (ex. «Nicușor Dan», «Palatul Victoria», «Banca Națională a României»); gol dacă știrea nu are un asemenea subiect concret",
+  "imagine_subiect": "DOAR numele complet (prenume + nume) al persoanei centrale a știrii, sau numele unei clădiri / unui loc celebru (ex. «Nicușor Dan», «Palatul Parlamentului»); GOL pentru instituții, sigle, firme, acronime (ANRE, ANAF, BNR) sau subiecte generale",
   "imagine_en": "o descriere scurtă în engleză a unei scene foto SIMBOLICE potrivite știrii, fără persoane reale identificabile, fără text (ex. «euro banknotes and a calculator on an office desk»)"
 }
 TXT;
@@ -631,18 +631,25 @@ TXT;
         return new WP_Error('hzn_noimg', 'fără imagine potrivită');
     }
 
-    /** Toate cuvintele importante ale subiectului apar în titlul fișierului? */
+    /**
+     * Toate cuvintele subiectului apar ca CUVINTE ÎNTREGI în titlul fișierului, iar
+     * subiectul are cel puțin 2 cuvinte (prenume + nume / nume de loc). v3.50.1: înainte
+     * se căuta subșir, deci „ANRE" se potrivea în orice fișier care conținea literele
+     * astea și coverul ieșea fără legătură cu știrea.
+     */
     private function relevant($entity, $file_title) {
-        $norm = function ($t) { return mb_strtolower(remove_accents((string) $t)); };
-        $hay  = $norm($file_title);
-        $words = preg_split('/[^\p{L}\p{N}]+/u', $norm($entity), -1, PREG_SPLIT_NO_EMPTY);
-        $n = 0;
-        foreach ($words as $w) {
-            if (mb_strlen($w) < 3 || in_array($w, array('din', 'lui', 'pentru', 'the', 'and', 'nationala', 'romaniei'), true)) { continue; }
-            $n++;
-            if (strpos($hay, $w) === false) { return false; }
+        $words = function ($t) {
+            return preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower(remove_accents((string) $t)), -1, PREG_SPLIT_NO_EMPTY);
+        };
+        $hay  = array_flip($words($file_title));
+        $need = array_filter($words($entity), function ($w) {
+            return mb_strlen($w) >= 3 && !in_array($w, array('din', 'lui', 'pentru', 'the', 'and', 'of'), true);
+        });
+        if (count($need) < 2) { return false; }
+        foreach ($need as $w) {
+            if (!isset($hay[$w])) { return false; }
         }
-        return $n > 0;
+        return true;
     }
 
     private function license_ok($lic) {
