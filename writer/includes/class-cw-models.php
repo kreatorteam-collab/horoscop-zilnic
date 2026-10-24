@@ -17,10 +17,11 @@ class CW_Models {
         $ids = get_option('cw_gateway_models', array());
         if (!is_array($ids) || trim((string) get_option('cw_openai_base', '')) === '') { return array(); }
         $out = array();
-        $builtin = self::builtin(); // cele cunoscute rămân în grupul lor (cu prețuri); merg oricum prin server
+        $builtin = self::builtin(); // modelele cunoscute își păstrează eticheta și prețul
         foreach ($ids as $id) {
             $id = (string) $id;
-            if ($id === '' || isset($out[$id]) || isset($builtin[$id])) { continue; }
+            if ($id === '' || isset($out[$id])) { continue; }
+            if (isset($builtin[$id])) { $out[$id] = $builtin[$id] + array('gateway' => true); continue; }
             $out[$id] = array(
                 'label' => $id, 'tagline' => 'Server API', 'desc' => 'Model de pe serverul API configurat.',
                 'provider' => 'openai', 'in' => 0.0, 'out' => 0.0,
@@ -37,7 +38,9 @@ class CW_Models {
     }
 
     public static function all() {
-        return self::builtin() + self::gateway();
+        $all = self::builtin();
+        foreach (self::gateway() as $id => $m) { $all[$id] = $m; }
+        return $all;
     }
 
     public static function builtin() {

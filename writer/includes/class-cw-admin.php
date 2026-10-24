@@ -13,6 +13,11 @@ class CW_Admin {
         add_action('wp_ajax_cw_test_key', array($this, 'ajax_test_key'));
         add_action('wp_ajax_cw_test_openai_key', array($this, 'ajax_test_openai_key'));
         add_action('wp_ajax_cw_list_models', array($this, 'ajax_list_models'));
+        // Alt server API = altă listă de modele: o luăm din nou la următoarea deschidere.
+        add_action('update_option_cw_openai_base', function () {
+            delete_transient('cw_gw_fresh');
+            delete_option('cw_gateway_models');
+        }, 10, 0);
         add_action('admin_notices', array($this, 'credit_notices'));
 
         // La salvare: dacă e gol (câmp mascat) păstrăm cheia veche; altfel criptăm noua cheie.
@@ -100,6 +105,13 @@ class CW_Admin {
         $allowed  = array('writer', 'horoscop', 'vreme', 'bulk', 'stiri');
         $tab      = (isset($_GET['tab']) && in_array($_GET['tab'], $allowed, true)) ? $_GET['tab'] : 'writer';
         $base_url = admin_url('options-general.php?page=claude-writer');
+
+        // v3.51.3: cu server API setat, lista lui de modele se ia singură (cache 12 ore,
+        // la eșec reîncercăm după 30 de minute) — fără să mai apeși vreun buton.
+        if (CW_API::openai_base() !== CW_API::OPENAI_BASE && !get_transient('cw_gw_fresh')) {
+            $r = CW_API::refresh_gateway_models();
+            set_transient('cw_gw_fresh', 1, is_wp_error($r) ? 30 * MINUTE_IN_SECONDS : 12 * HOUR_IN_SECONDS);
+        }
         ?>
         <div class="wrap cw-wrap">
             <h1><?php esc_html_e('AI Writer & Conținut Zilnic', 'claude-writer'); ?></h1>
@@ -264,18 +276,19 @@ class CW_Admin {
                         <p>
                             <label class="cw-label"><?php esc_html_e('Model implicit', 'claude-writer'); ?></label>
                             <select name="cw_default_model" class="widefat">
-                                <?php $dm = CW_Models::default_model(); ?>
+                                <?php $dm = CW_Models::default_model(); $gw = CW_Models::gateway(); ?>
+                                <?php if ($gw) : // server API setat: doar modelele de pe el (OpenAI direct nu mai e folosit) ?>
+                                <optgroup label="<?php echo esc_attr(CW_Models::gateway_label()); ?>">
+                                <?php foreach ($gw as $id => $m) : ?>
+                                    <option value="<?php echo esc_attr($id); ?>" <?php selected($id, $dm); ?>><?php echo esc_html($m['label'] === $id ? $id : $m['label'] . ' (' . $id . ')'); ?></option>
+                                <?php endforeach; ?>
+                                </optgroup>
+                                <?php else : ?>
                                 <optgroup label="OpenAI (GPT)">
                                 <?php foreach ($models as $id => $m) : if ($m['provider'] !== 'openai' || !empty($m['gateway'])) { continue; } ?>
                                     <option value="<?php echo esc_attr($id); ?>" <?php selected($id, $dm); ?>>
                                         <?php echo esc_html($m['label'] . ' — ' . $m['desc']); ?>
                                     </option>
-                                <?php endforeach; ?>
-                                </optgroup>
-                                <?php $gw = CW_Models::gateway(); if ($gw) : ?>
-                                <optgroup label="<?php echo esc_attr(CW_Models::gateway_label()); ?>">
-                                <?php foreach ($gw as $id => $m) : ?>
-                                    <option value="<?php echo esc_attr($id); ?>" <?php selected($id, $dm); ?>><?php echo esc_html($id); ?></option>
                                 <?php endforeach; ?>
                                 </optgroup>
                                 <?php endif; ?>
