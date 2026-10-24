@@ -666,6 +666,7 @@ TXT;
             }
         }
         update_post_meta($post_id, '_hzn_image', $img_note);
+        update_option('hzn_last_image', current_time('H:i') . ' — ' . $img_note, 'no');
 
         return array(
             'post_id'   => (int) $post_id,
@@ -689,6 +690,9 @@ TXT;
             $credit = isset($art['image_credit']) ? (string) $art['image_credit'] : '';
             $id = $this->sideload($art['image'], $post_id, $rw['title'], $credit);
             if (!is_wp_error($id)) { return array('id' => $id, 'credit' => $credit, 'source' => 'sursa'); }
+            $src_err = 'poza sursei: ' . $id->get_error_message();
+        } elseif ((int) get_option('hzn_source_photo', 0)) {
+            $src_err = 'poza sursei: pagina nu are og:image';
         }
         // v3.50.6: căutarea după nume e OPRITĂ implicit — la „Cristian Popa" (BNR) a adus
         // un militar american cu același nume. Fiecare știre primește colajul AI.
@@ -708,9 +712,9 @@ TXT;
                 return HZ_ImageGen::sideload($subject, $post_id, $rw['title'], '', self::collage_prompt($subject));
             });
             if (!is_wp_error($id)) { return array('id' => (int) $id, 'credit' => '', 'source' => 'ai'); }
-            return $id;
+            return new WP_Error('hzn_noimg', (isset($src_err) ? $src_err . '; ' : '') . 'colaj AI: ' . $id->get_error_message());
         }
-        return new WP_Error('hzn_noimg', 'fără imagine potrivită');
+        return new WP_Error('hzn_noimg', (isset($src_err) ? $src_err . '; ' : '') . 'fără cheie OpenAI pentru imagini');
     }
 
     /**
@@ -822,9 +826,22 @@ TXT;
         require_once ABSPATH . 'wp-admin/includes/file.php';
         require_once ABSPATH . 'wp-admin/includes/image.php';
 
-        $tmp = download_url($url, 60);
-        if (is_wp_error($tmp)) { return $tmp; }
-        $ext  = preg_match('/\.png(\?|$)/i', $url) ? 'png' : 'jpg';
+        // v3.51.6: descărcare cu antet de browser + Referer (download_url pleacă cu UA-ul
+        // WordPress, pe care unele CDN-uri îl refuză), iar extensia vine din conținutul
+        // real: o poză WebP numită .jpg e respinsă de WordPress ca „tip nepermis".
+        $tmp = wp_tempnam('hzn-img');
+        $r   = wp_remote_get($url, array(
+            'timeout' => 60, 'stream' => true, 'filename' => $tmp, 'user-agent' => self::UA,
+            'headers' => array('Referer' => 'https://www.digi24.ro/', 'Accept' => 'image/avif,image/webp,image/*,*/*;q=0.8'),
+        ));
+        if (is_wp_error($r) || (int) wp_remote_retrieve_response_code($r) !== 200) {
+            @unlink($tmp);
+            return new WP_Error('hzn_img_dl', 'descărcarea pozei a eșuat (' . (is_wp_error($r) ? $r->get_error_message() : 'HTTP ' . wp_remote_retrieve_response_code($r)) . ')');
+        }
+        $mime = function_exists('wp_get_image_mime') ? (string) wp_get_image_mime($tmp) : '';
+        $exts = array('image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp', 'image/gif' => 'gif', 'image/avif' => 'avif');
+        if (!isset($exts[$mime])) { @unlink($tmp); return new WP_Error('hzn_img_type', 'fișierul descărcat nu e o imagine (' . ($mime !== '' ? $mime : 'necunoscut') . ')'); }
+        $ext  = $exts[$mime];
         $name = sanitize_file_name(sanitize_title($alt) . '-' . substr(md5($url), 0, 6) . '.' . $ext);
         $id   = media_handle_sideload(array('name' => $name, 'tmp_name' => $tmp), $post_id, $alt);
         if (is_wp_error($id)) { @unlink($tmp); return $id; }
@@ -902,6 +919,7 @@ TXT;
                 ?>
                 <?php if ($last !== '') : ?><span style="display:block;"><?php echo esc_html(sprintf(__('Ultima știre: %s', 'horoscop-zilnic'), $last)); ?></span><?php endif; ?>
                 <?php if ($err !== '') : ?><span style="color:#b32d2e;display:block;"><?php echo esc_html(sprintf(__('Ultima eroare: %s', 'horoscop-zilnic'), $err)); ?></span><?php endif; ?>
+                <?php $li = (string) get_option('hzn_last_image', ''); if ($li !== '') : ?><span style="display:block;"><?php echo esc_html(sprintf(__('Ultima imagine: %s', 'horoscop-zilnic'), $li)); ?></span><?php endif; ?>
                 <span style="display:block;"><?php echo esc_html(sprintf(__('Rulează pe: %1$s · model %2$s', 'horoscop-zilnic'),
                     CW_API::openai_base() !== CW_API::OPENAI_BASE ? CW_API::openai_base() : 'OpenAI direct', self::effective_model())); ?></span>
             </p>
