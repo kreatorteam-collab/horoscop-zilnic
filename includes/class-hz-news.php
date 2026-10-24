@@ -85,6 +85,7 @@ class HZ_News {
             'hzn_author'     => 0,
             'hzn_images'     => 1,
             'hzn_free_photos'=> 0,
+            'hzn_source_photo'=> 0,
             'hzn_max_age'    => 24,
             'hzn_rss_url'    => 'https://www.digi24.ro/rss',
         );
@@ -376,7 +377,21 @@ class HZ_News {
         $image = $this->meta($xp, 'og:image');
         if (!preg_match('#^https://#i', $image)) { $image = ''; }
 
-        return array('url' => $url, 'title' => $title, 'text' => $text, 'image' => $image, 'published' => $ts ? (int) $ts : 0);
+        return array('url' => $url, 'title' => $title, 'text' => $text, 'image' => $image,
+                     'image_credit' => $this->photo_credit($xp, $html), 'published' => $ts ? (int) $ts : 0);
+    }
+
+    /**
+     * Creditul pozei principale, exact cum îl scrie sursa („Foto: Profimedia"), sau ''.
+     * Întâi legenda (<figcaption>), apoi primul „Foto: …" din pagină.
+     */
+    private function photo_credit(DOMXPath $xp, $html) {
+        $re = '/\b(?:sursa\s+)?foto(?:grafie)?\s*:\s*([^<>"\n|]{2,80})/iu';
+        foreach ($xp->query('//figcaption') as $fc) {
+            if (preg_match($re, preg_replace('/\s+/u', ' ', $fc->textContent), $m)) { return 'Foto: ' . trim($m[1], " \t.,;"); }
+        }
+        if (preg_match($re, wp_strip_all_tags($html), $m)) { return 'Foto: ' . trim($m[1], " \t.,;"); }
+        return '';
     }
 
     private function meta(DOMXPath $xp, $prop) {
@@ -592,7 +607,7 @@ IEȘIRE: DOAR un obiect JSON valid, fără markdown, cu cheile:
   "continut": "HTML cu <p>, <h2>, <ul>, <li>, <strong> (fără <h1>, fără linkuri)",
   "rezumat": "o propoziție de maximum 160 de caractere pentru descriere",
   "imagine_subiect": "DOAR numele complet (prenume + nume) al persoanei centrale a știrii, sau numele unei clădiri / unui loc celebru (ex. «Nicușor Dan», «Palatul Parlamentului»); GOL pentru instituții, sigle, firme, acronime (ANRE, ANAF, BNR) sau subiecte generale",
-  "imagine_en": "în engleză, compoziția unei imagini de tip COLAJ pentru știre, construită din CONȚINUTUL ei (nu doar din titlu): 1 personaj sau obiect principal în prim-plan + un fundal real din România + un simbol al subiectului (ex. «a Romanian traffic police officer in a fluorescent yellow POLITIA jacket writing a fine, in front of Bucharest communist-era apartment blocks with closed balconies, Romanian flag on a pole»). Personajele sunt GENERICE (polițist, medic, pensionar, ministru anonim), NICIODATĂ persoane reale numite. Dacă primești poza originală, o folosești DOAR ca să înțelegi subiectul (locul, obiectele, tipul de persoane): descrii o scenă NOUĂ, cu altă încadrare, nu copia fotografiei."
+  "imagine_en": "în engleză, compoziția unei imagini de tip COLAJ pentru știre, construită din CONȚINUTUL ei (nu doar din titlu): 1 personaj sau obiect principal în prim-plan + un fundal real din România + un simbol al subiectului (ex. «a Romanian traffic police officer in a fluorescent yellow POLITIA jacket writing a fine, in front of Bucharest communist-era apartment blocks with closed balconies, Romanian flag on a pole»). Dacă știrea e despre persoane reale numite (miniștri, politicieni, vedete), NU pune niciun om în prim-plan: folosești locuri, clădiri, steaguri, obiecte (ex. «Black Sea coast with cargo ships, Romanian and Turkish flags, NATO flag») — o față inventată ar fi luată drept persoana reală. Oameni doar generici (polițist, medic, pensionar), din spate sau în plan îndepărtat. Dacă primești poza originală, o folosești DOAR ca să înțelegi subiectul (locul, obiectele, tipul de persoane): descrii o scenă NOUĂ, cu altă încadrare, nu copia fotografiei."
 }
 TXT;
     }
@@ -619,14 +634,18 @@ TXT;
 
         $img_note = 'fără imagine';
         if ((int) get_option('hzn_images', 1)) {
-            $img = $this->cover($post_id, $rw);
+            $img = $this->cover($post_id, $rw, $art);
             if (is_wp_error($img)) {
                 $img_note = $img->get_error_message();
             } else {
                 set_post_thumbnail($post_id, $img['id']);
                 $img_note = $img['source'];
-                // v3.50.2: fără credit în text (cerința userului). De aceea license_ok()
-                // acceptă doar licențe care NU cer atribuire; creditul rămâne ca legendă în Media.
+                // v3.50.2: fără credit în text pentru pozele libere. v3.50.7: poza sursei
+                // păstrează creditul ei („Foto: Profimedia"), doar dacă sursa îl afișează.
+                if ($img['source'] === 'sursa' && $img['credit'] !== '') {
+                    $credit = '<p class="hz-photo-credit"><em>' . esc_html($img['credit']) . '</em></p>';
+                    wp_update_post(array('ID' => $post_id, 'post_content' => wp_slash(get_post_field('post_content', $post_id) . "\n" . $credit)));
+                }
             }
         }
         update_post_meta($post_id, '_hzn_image', $img_note);
@@ -645,7 +664,15 @@ TXT;
      * libere, landscape) → imagine AI generată de la zero. Pozele digi24 nu se ating.
      * @return array|WP_Error ['id', 'credit', 'source']
      */
-    private function cover($post_id, $rw) {
+    private function cover($post_id, $rw, $art = array()) {
+        // v3.50.7: poza originală a știrii, NEMODIFICATĂ, cu creditul sursei. Opțiune
+        // oprită implicit; pornită de user pe răspunderea lui (drepturile pozelor de
+        // agenție nu se transferă prin preluare).
+        if ((int) get_option('hzn_source_photo', 0) && !empty($art['image'])) {
+            $credit = isset($art['image_credit']) ? (string) $art['image_credit'] : '';
+            $id = $this->sideload($art['image'], $post_id, $rw['title'], $credit);
+            if (!is_wp_error($id)) { return array('id' => $id, 'credit' => $credit, 'source' => 'sursa'); }
+        }
         // v3.50.6: căutarea după nume e OPRITĂ implicit — la „Cristian Popa" (BNR) a adus
         // un militar american cu același nume. Fiecare știre primește colajul AI.
         if ($rw['entity'] !== '' && (int) get_option('hzn_free_photos', 0)) {
@@ -679,7 +706,7 @@ TXT;
              . 'Composite look: the main subject is a sharp cut-out in the foreground (left or right third), '
              . 'placed over a real, slightly softer background photo, with one symbolic element. Bright daylight, '
              . 'saturated colors, high detail, landscape 3:2. Romanian context (Romanian signage, uniforms, cars, buildings). '
-             . 'People are generic and anonymous - never a real, recognizable person or politician. '
+             . 'No close-up faces: any people are anonymous, seen from behind or far away - never a real or real-looking politician. '
              . 'No captions, no headline text, no watermark, no logos except natural uniform lettering.';
     }
 
@@ -812,7 +839,7 @@ TXT;
         $opts = array(
             'hzn_enabled' => 'absint', 'hzn_per_cat' => 'absint', 'hzn_start_hour' => 'absint',
             'hzn_end_hour' => 'absint', 'hzn_status' => 'sanitize_key', 'hzn_model' => 'sanitize_text_field',
-            'hzn_author' => 'absint', 'hzn_images' => 'absint', 'hzn_free_photos' => 'absint', 'hzn_max_age' => 'absint', 'hzn_rss_url' => 'esc_url_raw',
+            'hzn_author' => 'absint', 'hzn_images' => 'absint', 'hzn_free_photos' => 'absint', 'hzn_source_photo' => 'absint', 'hzn_max_age' => 'absint', 'hzn_rss_url' => 'esc_url_raw',
         );
         foreach (array_keys(self::sections()) as $key) {
             $opts['hzn_on_' . $key]  = 'absint';
@@ -937,6 +964,8 @@ TXT;
                         <td>
                             <input type="hidden" name="hzn_images" value="0" />
                             <label><input type="checkbox" name="hzn_images" value="1" <?php checked(1, (int) get_option('hzn_images', 1)); ?> /> <?php esc_html_e('Colaj AI generat din conținutul știrii (~$0,05)', 'horoscop-zilnic'); ?></label><br />
+                            <input type="hidden" name="hzn_source_photo" value="0" />
+                            <label><input type="checkbox" name="hzn_source_photo" value="1" <?php checked(1, (int) get_option('hzn_source_photo', 0)); ?> /> <?php esc_html_e('Folosește poza originală a știrii, cu creditul sursei („Foto: …”), pe răspunderea ta: pozele de agenție (Profimedia, Inquam etc.) pot aduce facturi pentru drepturi de autor', 'horoscop-zilnic'); ?></label><br />
                             <input type="hidden" name="hzn_free_photos" value="0" />
                             <label><input type="checkbox" name="hzn_free_photos" value="1" <?php checked(1, (int) get_option('hzn_free_photos', 0)); ?> /> <?php esc_html_e('Încearcă întâi Wikimedia / Openverse după numele persoanei (CC0; risc de poză cu altă persoană cu același nume)', 'horoscop-zilnic'); ?></label>
                         </td>
