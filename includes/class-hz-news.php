@@ -370,7 +370,12 @@ class HZ_News {
         }
         if (mb_strlen($text) > 9000) { $text = mb_substr($text, 0, 9000); }
 
-        return array('url' => $url, 'title' => $title, 'text' => $text, 'published' => $ts ? (int) $ts : 0);
+        // Poza originală: NU se descarcă și nu se publică. Adresa ei merge doar la modelul
+        // de rescriere, ca să DESCRIE subiectul pentru colajul AI (v3.50.5).
+        $image = $this->meta($xp, 'og:image');
+        if (!preg_match('#^https://#i', $image)) { $image = ''; }
+
+        return array('url' => $url, 'title' => $title, 'text' => $text, 'image' => $image, 'published' => $ts ? (int) $ts : 0);
     }
 
     private function meta(DOMXPath $xp, $prop) {
@@ -454,13 +459,27 @@ class HZ_News {
         $override = function () use ($system) { return $system; };
         $prompt   = "TITLUL ORIGINAL: " . $art['title'] . "\n\nTEXTUL ORIGINAL:\n" . $art['text'];
 
+        // Cu poza originală atașată (doar OpenAI acceptă aici imagine prin URL): modelul o
+        // vede ca REFERINȚĂ DE SUBIECT pentru descrierea colajului. Dacă OpenAI nu poate
+        // citi poza (CDN blocat, format), reluăm o singură dată fără ea.
+        $attempts = array($prompt);
+        if (!empty($art['image']) && CW_Models::provider($model) === 'openai') {
+            array_unshift($attempts, array(array('role' => 'user', 'content' => array(
+                array('type' => 'text', 'text' => $prompt . "\n\nPOZA ORIGINALĂ: atașată mai jos, DOAR ca referință de subiect pentru „imagine_en”."),
+                array('type' => 'image_url', 'image_url' => array('url' => $art['image'], 'detail' => 'low')),
+            ))));
+        }
+
         add_filter('cw_system_prompt', $override);
         try {
-            $result = CW_Usage::with_context('stiri', function () use ($model, $prompt) {
-                return CW_API::no_web(function () use ($model, $prompt) {
-                    return CW_API::generate($model, $prompt, 6000);
+            foreach ($attempts as $input) {
+                $result = CW_Usage::with_context('stiri', function () use ($model, $input) {
+                    return CW_API::no_web(function () use ($model, $input) {
+                        return CW_API::generate($model, $input, 6000);
+                    });
                 });
-            });
+                if (!is_wp_error($result) || in_array($result->get_error_code(), array('cw_no_key', 'cw_limit'), true)) { break; }
+            }
         } finally {
             remove_filter('cw_system_prompt', $override);
         }
@@ -480,6 +499,8 @@ class HZ_News {
         $bad = $this->reject_reason($art, $title, $content);
         if ($bad !== '') { return new WP_Error('hzn_reject', $bad); }
         $content = $this->source_link($content, $art['url']);
+        // Lead-ul (primul paragraf) cu bold, ca la site-urile de știri.
+        $content = preg_replace('#<p>(.*?)</p>#su', '<p><strong>$1</strong></p>', $content, 1);
 
         return array(
             'title'     => $title,
@@ -554,7 +575,8 @@ REGULI DE CONȚINUT
 - Păstrezi exact faptele: nume, funcții, cifre, date, locuri, ce s-a întâmplat. NU inventa nimic și nu adăuga informații care nu sunt în text.
 - Declarațiile pot rămâne citate scurte, între ghilimele românești („…"), atribuite persoanei care le-a făcut.
 - Scrii de la zero: alt titlu, alt început, altă ordine a ideilor, alte fraze. Nu reformula textul frază cu frază și nu copia propoziții din original.
-- Primul paragraf se încheie firesc cu atribuirea „conform digi24.ro" (ex. „…, conform digi24.ro."), scrisă EXACT așa, o singură dată în tot articolul. Linkul îl adaugă sistemul.
+- Stil jurnalistic de agenție: piramida inversată (esențialul primul), fraze scurte și clare, verbe active, fără opinii și fără adjective inutile.
+- Primul paragraf (lead-ul, 1-2 fraze) răspunde la cine, ce, când, unde și se încheie firesc cu atribuirea „conform digi24.ro" (ex. „…, conform digi24.ro."), scrisă EXACT așa, o singură dată în tot articolul. Linkul îl adaugă sistemul.
 - Nu pui sursa la final, nu pui linkuri, nu pui adrese web, nu pui credite foto.
 
 STIL
@@ -569,7 +591,7 @@ IEȘIRE: DOAR un obiect JSON valid, fără markdown, cu cheile:
   "continut": "HTML cu <p>, <h2>, <ul>, <li>, <strong> (fără <h1>, fără linkuri)",
   "rezumat": "o propoziție de maximum 160 de caractere pentru descriere",
   "imagine_subiect": "DOAR numele complet (prenume + nume) al persoanei centrale a știrii, sau numele unei clădiri / unui loc celebru (ex. «Nicușor Dan», «Palatul Parlamentului»); GOL pentru instituții, sigle, firme, acronime (ANRE, ANAF, BNR) sau subiecte generale",
-  "imagine_en": "în engleză, compoziția unei imagini de tip COLAJ pentru știre, construită din CONȚINUTUL ei (nu doar din titlu): 1 personaj sau obiect principal în prim-plan + un fundal real din România + un simbol al subiectului (ex. «a Romanian traffic police officer in a fluorescent yellow POLITIA jacket writing a fine, in front of Bucharest communist-era apartment blocks with closed balconies, Romanian flag on a pole»). Personajele sunt GENERICE (polițist, medic, pensionar, ministru anonim), NICIODATĂ persoane reale numite."
+  "imagine_en": "în engleză, compoziția unei imagini de tip COLAJ pentru știre, construită din CONȚINUTUL ei (nu doar din titlu): 1 personaj sau obiect principal în prim-plan + un fundal real din România + un simbol al subiectului (ex. «a Romanian traffic police officer in a fluorescent yellow POLITIA jacket writing a fine, in front of Bucharest communist-era apartment blocks with closed balconies, Romanian flag on a pole»). Personajele sunt GENERICE (polițist, medic, pensionar, ministru anonim), NICIODATĂ persoane reale numite. Dacă primești poza originală, o folosești DOAR ca să înțelegi subiectul (locul, obiectele, tipul de persoane): descrii o scenă NOUĂ, cu altă încadrare, nu copia fotografiei."
 }
 TXT;
     }
