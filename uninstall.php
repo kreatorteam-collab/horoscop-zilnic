@@ -22,7 +22,7 @@ $options = array(
     'hzr_do_meta', 'hzr_meta_overwrite', 'hzr_do_title', 'hzr_title_max_len', 'hzr_faq_heading', 'hzr_tk_heading',
     'hzr_day', 'hzr_stats', 'hzr_idle', 'hzr_last_error',
     // Modulul AI Writer inclus (fost plugin claude-writer) — opțiunile cw_*:
-    'cw_api_key', 'cw_openai_api_key', 'cw_openai_base', 'cw_openai_key_images', 'cw_model_default_gpt56', 'cw_model_default_sonnet',
+    'cw_api_key', 'cw_openai_api_key', 'cw_openai_base', 'cw_gateway_models', 'cw_openai_key_images', 'cw_model_default_gpt56', 'cw_model_default_sonnet',
     'cw_default_model', 'cw_effort', 'cw_temperature', 'cw_max_tokens', 'cw_stream_enabled',
     'cw_monthly_cost_limit', 'cw_system_prompt', 'cw_article_prompt', 'cw_rewrite_prompt',
     'cw_title_prompt', 'cw_keywords_prompt', 'cw_disclaimer', 'cw_auto_update', 'cw_db_version',

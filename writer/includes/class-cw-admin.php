@@ -266,12 +266,19 @@ class CW_Admin {
                             <select name="cw_default_model" class="widefat">
                                 <?php $dm = CW_Models::default_model(); ?>
                                 <optgroup label="OpenAI (GPT)">
-                                <?php foreach ($models as $id => $m) : if ($m['provider'] !== 'openai') { continue; } ?>
+                                <?php foreach ($models as $id => $m) : if ($m['provider'] !== 'openai' || !empty($m['gateway'])) { continue; } ?>
                                     <option value="<?php echo esc_attr($id); ?>" <?php selected($id, $dm); ?>>
                                         <?php echo esc_html($m['label'] . ' — ' . $m['desc']); ?>
                                     </option>
                                 <?php endforeach; ?>
                                 </optgroup>
+                                <?php $gw = CW_Models::gateway(); if ($gw) : ?>
+                                <optgroup label="<?php echo esc_attr(CW_Models::gateway_label()); ?>">
+                                <?php foreach ($gw as $id => $m) : ?>
+                                    <option value="<?php echo esc_attr($id); ?>" <?php selected($id, $dm); ?>><?php echo esc_html($id); ?></option>
+                                <?php endforeach; ?>
+                                </optgroup>
+                                <?php endif; ?>
                                 <optgroup label="Anthropic (Claude)">
                                 <?php foreach ($models as $id => $m) : if ($m['provider'] !== 'anthropic') { continue; } ?>
                                     <option value="<?php echo esc_attr($id); ?>" <?php selected($id, $dm); ?>>
@@ -447,33 +454,16 @@ class CW_Admin {
         if (!current_user_can('manage_options')) {
             wp_send_json_error(array('message' => __('Permisiune refuzată.', 'claude-writer')));
         }
-        $key = CW_API::openai_key();
-        if ($key === '') {
-            wp_send_json_error(array('message' => __('Salvează întâi cheia, apoi încearcă.', 'claude-writer')));
+        $ids = CW_API::refresh_gateway_models();
+        if (is_wp_error($ids)) {
+            wp_send_json_error(array('message' => $ids->get_error_message()));
         }
-        $response = wp_remote_get(CW_API::openai_url('models'), array(
-            'headers' => array('Authorization' => 'Bearer ' . $key),
-            'timeout' => 30,
-        ));
-        if (is_wp_error($response)) {
-            wp_send_json_error(array('message' => $response->get_error_message()));
-        }
-        $code = wp_remote_retrieve_response_code($response);
-        $body = json_decode(wp_remote_retrieve_body($response), true);
-        if ($code !== 200 || !isset($body['data']) || !is_array($body['data'])) {
-            $msg = isset($body['error']['message']) ? $body['error']['message'] : __('Serverul nu a întors lista de modele.', 'claude-writer');
-            wp_send_json_error(array('message' => sprintf('(%d) %s', $code, $msg)));
-        }
-        $ids = array();
-        foreach ($body['data'] as $m) {
-            if (is_array($m) && !empty($m['id'])) { $ids[] = (string) $m['id']; }
-        }
-        sort($ids);
-        $known = array_filter($ids, array('CW_Models', 'exists'));
+        $known = array_filter($ids, function ($id) { return array_key_exists($id, CW_Models::builtin()); });
         wp_send_json_success(array(
             'message' => sprintf(__('%1$d modele pe %2$s. Recunoscute de plugin: %3$s', 'claude-writer'),
                 count($ids), CW_API::openai_base(), $known ? implode(', ', $known) : __('niciunul', 'claude-writer'))
-                . "\n" . implode(', ', $ids),
+                . "\n" . implode(', ', $ids)
+                . (CW_API::openai_base() !== CW_API::OPENAI_BASE ? "\n" . __('Lista e salvată: modelele apar în „Model implicit” (reîncarcă pagina).', 'claude-writer') : ''),
         ));
     }
 

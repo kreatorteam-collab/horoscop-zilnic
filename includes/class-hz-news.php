@@ -945,7 +945,7 @@ TXT;
                         <td>
                             <select name="hzn_model" id="hzn_model">
                                 <?php foreach (CW_Models::all() as $id => $m) : ?>
-                                    <option value="<?php echo esc_attr($id); ?>" <?php selected($id, $model); ?>><?php echo esc_html($m['label'] . ' ($' . $m['in'] . ' / $' . $m['out'] . ' la 1M tokeni)'); ?></option>
+                                    <option value="<?php echo esc_attr($id); ?>" <?php selected($id, $model); ?>><?php echo esc_html(!empty($m['gateway']) ? CW_Models::gateway_label() . ': ' . $id : $m['label'] . ' ($' . $m['in'] . ' / $' . $m['out'] . ' la 1M tokeni)'); ?></option>
                                 <?php endforeach; ?>
                             </select>
                             <p class="description"><?php esc_html_e('Implicit GPT-5.4 Mini: aproximativ $0,01 pe știre.', 'horoscop-zilnic'); ?></p>
