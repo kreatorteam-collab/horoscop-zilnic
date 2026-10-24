@@ -29,6 +29,12 @@ $options = array(
     'cw_calls_total', 'cw_cost_total', 'cw_cost_monthly', 'cw_usage_by_model',
     'cw_credit_error_openai', 'cw_credit_error_anthropic',
     'cw_credit_mail_openai', 'cw_credit_mail_anthropic', 'cw_alert_email',
+    // Modul Știri (v3.50.0) — opțiunile hzn_*:
+    'hzn_enabled', 'hzn_per_cat', 'hzn_start_hour', 'hzn_end_hour', 'hzn_status', 'hzn_model',
+    'hzn_author', 'hzn_images', 'hzn_max_age', 'hzn_rss_url', 'hzn_seeded', 'hzn_seen', 'hzn_today',
+    'hzn_last_run', 'hzn_last_error',
+    'hzn_on_actualitate', 'hzn_on_politica', 'hzn_on_economie', 'hzn_on_externe',
+    'hzn_cat_actualitate', 'hzn_cat_politica', 'hzn_cat_economie', 'hzn_cat_externe',
 );
 foreach ($options as $opt) { delete_option($opt); }
 delete_transient('cw_update_info');
@@ -44,3 +50,5 @@ wp_clear_scheduled_hook('hz_horoscope_daily');
 wp_clear_scheduled_hook('hz_weather_daily');
 wp_clear_scheduled_hook('hz_bulk_process');
 wp_clear_scheduled_hook('hz_refresh_tick');
+wp_clear_scheduled_hook('hz_news_tick');
+delete_transient('hz_news_lock');

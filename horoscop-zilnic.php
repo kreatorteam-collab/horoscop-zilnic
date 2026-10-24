@@ -3,7 +3,7 @@
  * Plugin Name: AI Writer & Conținut Zilnic
  * Plugin URI: https://targetseo.ro/
  * Description: Generează și rescrie articole SEO direct în editor (GPT-5.6 și Claude), creează articole în bulk cu imagini de stock relevante (Magnific) și publică automat conținut zilnic: horoscopul cu toate cele 12 zodii și vremea pe regiuni (date oficiale ANM). Un singur plugin: chei API, costuri, editor, bulk, horoscop și vreme.
- * Version: 3.49.0
+ * Version: 3.50.0
  * Author: Eduard / TargetSEO
  * Text Domain: horoscop-zilnic
  * Requires at least: 5.6
@@ -15,7 +15,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('HZ_VERSION', '3.49.0');
+define('HZ_VERSION', '3.50.0');
 define('HZ_PATH', plugin_dir_path(__FILE__));
 define('HZ_URL', plugin_dir_url(__FILE__));
 
@@ -35,6 +35,7 @@ require_once HZ_PATH . 'includes/class-hz-review.php';
 require_once HZ_PATH . 'includes/class-hz-golinks.php';
 require_once HZ_PATH . 'includes/class-hz-bulk.php';
 require_once HZ_PATH . 'includes/class-hz-rewrite.php';
+require_once HZ_PATH . 'includes/class-hz-news.php';
 require_once HZ_PATH . 'includes/class-hz-remote.php';
 require_once HZ_PATH . 'includes/class-hz-admin.php';
 require_once HZ_PATH . 'includes/class-hz-updater.php';
@@ -44,6 +45,7 @@ function hz_init() {
     (new HZ_Horoscope())->init();
     (new HZ_Weather())->init();
     (new HZ_Bulk())->init();
+    (new HZ_News())->init();     // v3.50.0: știri preluate și rescrise (digi24)
     (new HZ_Remote())->init();   // v3.5.0: comenzi din panoul central (HMAC)
     (new HZ_GoLinks())->init(); // v3.16.0: redirector /go/{slug} pentru linkuri de afiliere
     (new HZ_Updater())->init();
@@ -237,6 +239,10 @@ add_action('init', function () {
         update_option('hzb_img1_forced', 1, 'no');
     }
 
+    // v3.50.0: modulul „Știri" — opțiunile hzn_*, pornit singur doar pe site-urile
+    // din HZ_News::default_hosts() (comunicateinpresa.ro, revistabravo.ro).
+    HZ_News::seed();
+
     update_option('hz_db_version', HZ_VERSION, 'no');
 });
 
@@ -322,6 +328,7 @@ register_activation_hook(__FILE__, function () {
     foreach (hz_bulk_defaults() as $name => $value) {
         add_option($name, $value, '', 'no');
     }
+    HZ_News::seed();
 });
 
 register_deactivation_hook(__FILE__, function () {
@@ -329,5 +336,6 @@ register_deactivation_hook(__FILE__, function () {
     wp_clear_scheduled_hook(HZ_Weather::HOOK);
     wp_clear_scheduled_hook(HZ_Bulk::HOOK);
     wp_clear_scheduled_hook(HZ_Bulk::WATCHDOG);
+    wp_clear_scheduled_hook(HZ_News::HOOK);
     wp_clear_scheduled_hook('hz_refresh_tick'); // v3.9.0: modul scos, cronul poate fi rămas
 });
