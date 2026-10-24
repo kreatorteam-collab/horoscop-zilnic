@@ -87,6 +87,7 @@ class HZ_News {
             'hzn_free_photos'=> 0,
             'hzn_source_photo'=> 0,
             'hzn_nsi_banner' => 1,
+            'hzn_exclude'    => 'vreme, sănătate, horoscop, vedete, filme, muzică',
             'hzn_max_age'    => 24,
             'hzn_rss_url'    => 'https://www.digi24.ro/rss',
         );
@@ -250,16 +251,17 @@ class HZ_News {
             }
 
             $cat = '';
-            if ($auto) {
-                $cat = $this->classify($art);
-                if (is_wp_error($cat)) {
-                    if (in_array($cat->get_error_code(), array('cw_no_key', 'cw_limit', 'cw_api', 'cw_http'), true)) { return $cat; }
-                    $cat = '';
+            if ($auto || self::excluded_topics()) {
+                $res = $this->classify($art, (bool) $auto);
+                if (is_wp_error($res)) {
+                    if (in_array($res->get_error_code(), array('cw_no_key', 'cw_limit', 'cw_api', 'cw_http'), true)) { return $res; }
+                    $res = '';
                 }
-                if ($cat === '') {
-                    $this->mark_seen($url, 'fara_categorie');
+                if ($res === '') {
+                    $this->mark_seen($url, 'exclus_sau_fara_categorie');
                     continue;
                 }
+                if ($auto) { $cat = $res; }
             }
 
             $tries++;
@@ -289,7 +291,7 @@ class HZ_News {
             if ($src === '') { continue; }
             foreach ($this->links_from($src) as $u) {
                 $path = (string) wp_parse_url($u, PHP_URL_PATH);
-                if (preg_match($sec['match'], $path)) { $urls[$u] = true; }
+                if (preg_match($sec['match'], $path) && !$this->url_excluded($path)) { $urls[$u] = true; }
             }
         }
         return array_keys($urls);
@@ -505,19 +507,60 @@ class HZ_News {
         return $model;
     }
 
+    /** Temele care NU se preiau (v3.52.1), din setarea `hzn_exclude` (listă cu virgulă). */
+    public static function excluded_topics() {
+        $raw = (string) get_option('hzn_exclude', self::defaults()['hzn_exclude']);
+        return array_values(array_filter(array_map('trim', explode(',', $raw))));
+    }
+
     /**
-     * Categoria existentă a site-ului în care se potrivește știrea, sau '' dacă nu se
-     * potrivește clar în niciuna. Apel scurt: titlu + începutul textului.
+     * Adresa e dintr-o rubrică exclusă? Se uită doar la segmentele de rubrică (nu la
+     * slug-ul titlului), cu câteva sinonime pentru cum își numește digi24 rubricile.
      */
-    private function classify($art) {
-        $cats = self::site_categories();
-        if (!$cats) { return ''; }
+    private function url_excluded($path) {
+        $topics = self::excluded_topics();
+        if (!$topics) { return false; }
+        $syn = array(
+            'vreme' => array('meteo', 'vremea'), 'vedete' => array('showbiz', 'monden', 'vip', 'celebritati'),
+            'filme' => array('film', 'cinema', 'seriale'), 'muzica' => array('concert'), 'horoscop' => array('zodiac'),
+        );
+        $roots = array();
+        foreach ($topics as $t) {
+            $k = sanitize_title(remove_accents($t));
+            if ($k === '') { continue; }
+            $roots[] = $k;
+            if (isset($syn[$k])) { $roots = array_merge($roots, $syn[$k]); }
+        }
+        $segs = array_slice(explode('/', trim((string) $path, '/')), 0, -1); // fără slug-ul articolului
+        foreach ($segs as $seg) {
+            foreach ($roots as $r) {
+                if (strpos($seg, $r) !== false) { return true; }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Apel scurt înainte de rescriere (titlu + începutul textului):
+     * - cu $with_cats: categoria existentă a site-ului în care se potrivește CLAR știrea;
+     * - fără: doar verificarea temelor excluse ('OK' = se poate prelua).
+     * '' = se sare (nicio categorie potrivită sau temă exclusă).
+     */
+    private function classify($art, $with_cats = true) {
+        $cats   = $with_cats ? self::site_categories() : array();
+        $topics = self::excluded_topics();
+        if (!$cats && !$topics) { return 'OK'; }
         $model  = self::effective_model();
-        $prompt = "Știre:\nTITLU: " . $art['title'] . "\nÎNCEPUT: " . mb_substr($art['text'], 0, 700)
-                . "\n\nCategoriile site-ului: " . implode(' | ', $cats)
-                . "\n\nÎn ce categorie a site-ului se potrivește CLAR această știre? Răspunde DOAR cu numele categoriei, scris exact ca în listă, "
-                . "sau cu NICIUNA dacă știrea nu ține de niciuna (nu forța o potrivire cu o categorie generală).";
-        $system   = 'Ești editor și clasifici știri pe rubricile unui site. Răspunzi cu un singur nume de categorie sau NICIUNA, fără alt text.';
+        $prompt = "Știre:\nTITLU: " . $art['title'] . "\nÎNCEPUT: " . mb_substr($art['text'], 0, 700);
+        if ($topics) {
+            $prompt .= "\n\nTEME EXCLUSE: " . implode(', ', $topics) . ". Dacă știrea e în principal despre una dintre ele, răspunde NICIUNA.";
+        }
+        $prompt .= $cats
+            ? "\n\nCategoriile site-ului: " . implode(' | ', $cats)
+              . "\n\nÎn ce categorie a site-ului se potrivește CLAR această știre? Răspunde DOAR cu numele categoriei, scris exact ca în listă, "
+              . "sau cu NICIUNA dacă știrea nu ține de niciuna (nu forța o potrivire cu o categorie generală)."
+            : "\n\nRăspunde DOAR cu OK dacă știrea NU e despre temele excluse, altfel NICIUNA.";
+        $system   = 'Ești editor și clasifici știri pe rubricile unui site. Răspunzi cu un singur cuvânt / nume de categorie, fără alt text.';
         $override = function () use ($system) { return $system; };
         add_filter('cw_system_prompt', $override);
         try {
@@ -531,6 +574,7 @@ class HZ_News {
         }
         if (is_wp_error($r)) { return $r; }
         $ans = mb_strtolower(remove_accents(trim(wp_strip_all_tags((string) $r['text']), " \t\n\r\"'„”.«»")));
+        if (!$cats) { return $ans === 'ok' ? 'OK' : ''; }
         foreach ($cats as $c) {
             if (mb_strtolower(remove_accents($c)) === $ans) { return $c; }
         }
@@ -988,7 +1032,7 @@ TXT;
         $opts = array(
             'hzn_enabled' => 'absint', 'hzn_per_cat' => 'absint', 'hzn_start_hour' => 'absint',
             'hzn_end_hour' => 'absint', 'hzn_status' => 'sanitize_key', 'hzn_model' => 'sanitize_text_field',
-            'hzn_author' => 'absint', 'hzn_images' => 'absint', 'hzn_free_photos' => 'absint', 'hzn_source_photo' => 'absint', 'hzn_nsi_banner' => 'absint', 'hzn_max_age' => 'absint', 'hzn_rss_url' => 'esc_url_raw',
+            'hzn_author' => 'absint', 'hzn_images' => 'absint', 'hzn_free_photos' => 'absint', 'hzn_source_photo' => 'absint', 'hzn_nsi_banner' => 'absint', 'hzn_exclude' => 'sanitize_text_field', 'hzn_max_age' => 'absint', 'hzn_rss_url' => 'esc_url_raw',
         );
         foreach (array_keys(self::sections()) as $key) {
             $opts['hzn_on_' . $key]  = 'absint';
@@ -1079,6 +1123,13 @@ TXT;
                                     )); ?>
                                 </p>
                             <?php endforeach; ?>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="hzn_exclude"><?php esc_html_e('Teme excluse', 'horoscop-zilnic'); ?></label></th>
+                        <td>
+                            <input type="text" name="hzn_exclude" id="hzn_exclude" class="large-text" value="<?php echo esc_attr(get_option('hzn_exclude', self::defaults()['hzn_exclude'])); ?>" />
+                            <p class="description"><?php esc_html_e('Separate prin virgulă. Știrile pe aceste teme nu se preiau (filtrate după rubrica digi24 și după conținut).', 'horoscop-zilnic'); ?></p>
                         </td>
                     </tr>
                     <tr>
