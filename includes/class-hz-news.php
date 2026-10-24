@@ -102,6 +102,10 @@ class HZ_News {
         add_action('admin_init', array($this, 'register_settings'));
         add_action('wp_ajax_hzn_test', array($this, 'ajax_test'));
         add_action('update_option_hzn_enabled', array($this, 'reschedule'), 10, 0);
+        // Setări schimbate (aici sau serverul / cheia din AI Writer) = eroarea veche nu mai e relevantă.
+        foreach (array('hzn_model', 'hzn_enabled', 'cw_openai_base', 'cw_openai_api_key', 'cw_default_model') as $opt) {
+            add_action('update_option_' . $opt, function () { update_option('hzn_last_error', '', 'no'); }, 10, 0);
+        }
     }
 
     /* ---------------- programare ---------------- */
@@ -466,7 +470,8 @@ class HZ_News {
 
     /* ---------------- rescrierea ---------------- */
 
-    private function rewrite($art) {
+    /** Modelul cu care se scriu știrile acum (setarea, corectată pentru serverul API). */
+    public static function effective_model() {
         $model = (string) get_option('hzn_model', self::DEFAULT_MODEL);
         if (!CW_Models::exists($model)) { $model = self::DEFAULT_MODEL; }
         // v3.51.4: cu server API (ex. creator.ms) modelul trebuie să existe PE server;
@@ -477,6 +482,11 @@ class HZ_News {
             $model = isset($gw[$def]) ? $def : (string) key($gw);
         }
         $model = CW_API::resolve_model($model);
+        return $model;
+    }
+
+    private function rewrite($art) {
+        $model = self::effective_model();
 
         $system   = self::system_prompt();
         $override = function () use ($system) { return $system; };
@@ -892,6 +902,8 @@ TXT;
                 ?>
                 <?php if ($last !== '') : ?><span style="display:block;"><?php echo esc_html(sprintf(__('Ultima știre: %s', 'horoscop-zilnic'), $last)); ?></span><?php endif; ?>
                 <?php if ($err !== '') : ?><span style="color:#b32d2e;display:block;"><?php echo esc_html(sprintf(__('Ultima eroare: %s', 'horoscop-zilnic'), $err)); ?></span><?php endif; ?>
+                <span style="display:block;"><?php echo esc_html(sprintf(__('Rulează pe: %1$s · model %2$s', 'horoscop-zilnic'),
+                    CW_API::openai_base() !== CW_API::OPENAI_BASE ? CW_API::openai_base() : 'OpenAI direct', self::effective_model())); ?></span>
             </p>
 
             <form method="post" action="options.php" style="max-width:720px;">
