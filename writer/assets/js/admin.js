@@ -30,6 +30,24 @@
             });
         });
 
+        // Lista modelelor de pe serverul GPT configurat (v3.51.1)
+        $('#cw-list-models').on('click', function () {
+            var $btn = $(this), $res = $('#cw-list-models-result');
+            $res.removeClass('cw-ok cw-err').text('…');
+            $btn.prop('disabled', true);
+            $.post(CWAdmin.ajaxUrl, { action: 'cw_list_models', nonce: CWAdmin.nonce }).done(function (res) {
+                if (res && res.success) {
+                    $res.addClass('cw-ok').text(res.data.message);
+                } else {
+                    $res.addClass('cw-err').text('✗ ' + ((res && res.data && res.data.message) ? res.data.message : 'Eroare'));
+                }
+            }).fail(function () {
+                $res.addClass('cw-err').text('✗ Eroare de rețea');
+            }).always(function () {
+                $btn.prop('disabled', false);
+            });
+        });
+
         // Test cheie API Anthropic
         $('#cw-test-key').on('click', function () {
             var $btn = $(this), $res = $('#cw-test-result');
