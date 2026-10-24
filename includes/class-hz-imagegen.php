@@ -196,12 +196,13 @@ class HZ_ImageGen {
      * Genereaza o imagine si o incarca in biblioteca media. Returneaza att_id sau WP_Error.
      * $keywords = cuvinte-cheie in engleza (deja traduse din titlu de HZ_Bulk).
      */
-    public static function sideload($keywords, $post_id, $title, $style = '') {
+    public static function sideload($keywords, $post_id, $title, $style = '', $full_prompt = '') {
         if (!self::has_key()) {
             return new WP_Error('hzig_key', 'Cheia OpenAI nu e configurată pentru generarea de imagini.');
         }
         $key    = CW_API::openai_key_for('imagini');
-        $prompt = self::build_prompt($keywords, $style);
+        // $full_prompt (v3.50.4, modulul Știri): promptul complet, fără șablonul foto de mai jos.
+        $prompt = $full_prompt !== '' ? $full_prompt : self::build_prompt($keywords, $style);
 
         $payload = array(
             'model'   => self::model(),

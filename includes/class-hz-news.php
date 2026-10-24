@@ -569,7 +569,7 @@ IEȘIRE: DOAR un obiect JSON valid, fără markdown, cu cheile:
   "continut": "HTML cu <p>, <h2>, <ul>, <li>, <strong> (fără <h1>, fără linkuri)",
   "rezumat": "o propoziție de maximum 160 de caractere pentru descriere",
   "imagine_subiect": "DOAR numele complet (prenume + nume) al persoanei centrale a știrii, sau numele unei clădiri / unui loc celebru (ex. «Nicușor Dan», «Palatul Parlamentului»); GOL pentru instituții, sigle, firme, acronime (ANRE, ANAF, BNR) sau subiecte generale",
-  "imagine_en": "o descriere scurtă în engleză a unei scene foto SIMBOLICE potrivite știrii, fără persoane reale identificabile, fără text (ex. «euro banknotes and a calculator on an office desk»)"
+  "imagine_en": "în engleză, compoziția unei imagini de tip COLAJ pentru știre, construită din CONȚINUTUL ei (nu doar din titlu): 1 personaj sau obiect principal în prim-plan + un fundal real din România + un simbol al subiectului (ex. «a Romanian traffic police officer in a fluorescent yellow POLITIA jacket writing a fine, in front of Bucharest communist-era apartment blocks with closed balconies, Romanian flag on a pole»). Personajele sunt GENERICE (polițist, medic, pensionar, ministru anonim), NICIODATĂ persoane reale numite."
 }
 TXT;
     }
@@ -636,12 +636,26 @@ TXT;
         if (class_exists('HZ_ImageGen') && HZ_ImageGen::has_key()) {
             $subject = $rw['img_en'] !== '' ? $rw['img_en'] : $rw['title'];
             $id = CW_Usage::with_context('imagini', function () use ($subject, $post_id, $rw) {
-                return HZ_ImageGen::sideload($subject . ', symbolic news illustration, no identifiable real people', $post_id, $rw['title']);
+                return HZ_ImageGen::sideload($subject, $post_id, $rw['title'], '', self::collage_prompt($subject));
             });
             if (!is_wp_error($id)) { return array('id' => (int) $id, 'credit' => '', 'source' => 'ai'); }
             return $id;
         }
         return new WP_Error('hzn_noimg', 'fără imagine potrivită');
+    }
+
+    /**
+     * v3.50.4: imaginea AI în stilul colajelor de știri de pe site-urile românești
+     * (personaj decupat în prim-plan peste un fundal real + un simbol), cerută de user.
+     * Personajele rămân generice: fără chipuri de oameni reali (fals + risc legal).
+     */
+    public static function collage_prompt($scene) {
+        return 'Photorealistic Romanian online news thumbnail in tabloid photo-collage style: ' . trim($scene) . '. '
+             . 'Composite look: the main subject is a sharp cut-out in the foreground (left or right third), '
+             . 'placed over a real, slightly softer background photo, with one symbolic element. Bright daylight, '
+             . 'saturated colors, high detail, landscape 3:2. Romanian context (Romanian signage, uniforms, cars, buildings). '
+             . 'People are generic and anonymous - never a real, recognizable person or politician. '
+             . 'No captions, no headline text, no watermark, no logos except natural uniform lettering.';
     }
 
     /**
