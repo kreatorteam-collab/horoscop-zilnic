@@ -84,6 +84,7 @@ class HZ_News {
             'hzn_model'      => self::DEFAULT_MODEL,
             'hzn_author'     => 0,
             'hzn_images'     => 1,
+            'hzn_free_photos'=> 0,
             'hzn_max_age'    => 24,
             'hzn_rss_url'    => 'https://www.digi24.ro/rss',
         );
@@ -645,7 +646,9 @@ TXT;
      * @return array|WP_Error ['id', 'credit', 'source']
      */
     private function cover($post_id, $rw) {
-        if ($rw['entity'] !== '') {
+        // v3.50.6: căutarea după nume e OPRITĂ implicit — la „Cristian Popa" (BNR) a adus
+        // un militar american cu același nume. Fiecare știre primește colajul AI.
+        if ($rw['entity'] !== '' && (int) get_option('hzn_free_photos', 0)) {
             foreach (array('wikimedia', 'openverse') as $src) {
                 $found = $src === 'wikimedia' ? $this->find_wikimedia($rw['entity']) : $this->find_openverse($rw['entity']);
                 if (!$found) { continue; }
@@ -809,7 +812,7 @@ TXT;
         $opts = array(
             'hzn_enabled' => 'absint', 'hzn_per_cat' => 'absint', 'hzn_start_hour' => 'absint',
             'hzn_end_hour' => 'absint', 'hzn_status' => 'sanitize_key', 'hzn_model' => 'sanitize_text_field',
-            'hzn_author' => 'absint', 'hzn_images' => 'absint', 'hzn_max_age' => 'absint', 'hzn_rss_url' => 'esc_url_raw',
+            'hzn_author' => 'absint', 'hzn_images' => 'absint', 'hzn_free_photos' => 'absint', 'hzn_max_age' => 'absint', 'hzn_rss_url' => 'esc_url_raw',
         );
         foreach (array_keys(self::sections()) as $key) {
             $opts['hzn_on_' . $key]  = 'absint';
@@ -933,7 +936,9 @@ TXT;
                         <th scope="row"><?php esc_html_e('Imagine cover', 'horoscop-zilnic'); ?></th>
                         <td>
                             <input type="hidden" name="hzn_images" value="0" />
-                            <label><input type="checkbox" name="hzn_images" value="1" <?php checked(1, (int) get_option('hzn_images', 1)); ?> /> <?php esc_html_e('Wikimedia Commons / Openverse (CC0 / domeniu public), altfel imagine AI (~$0,05)', 'horoscop-zilnic'); ?></label>
+                            <label><input type="checkbox" name="hzn_images" value="1" <?php checked(1, (int) get_option('hzn_images', 1)); ?> /> <?php esc_html_e('Colaj AI generat din conținutul știrii (~$0,05)', 'horoscop-zilnic'); ?></label><br />
+                            <input type="hidden" name="hzn_free_photos" value="0" />
+                            <label><input type="checkbox" name="hzn_free_photos" value="1" <?php checked(1, (int) get_option('hzn_free_photos', 0)); ?> /> <?php esc_html_e('Încearcă întâi Wikimedia / Openverse după numele persoanei (CC0; risc de poză cu altă persoană cu același nume)', 'horoscop-zilnic'); ?></label>
                         </td>
                     </tr>
                     <tr>
