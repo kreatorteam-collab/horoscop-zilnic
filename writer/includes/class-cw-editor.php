@@ -81,17 +81,18 @@ class CW_Editor {
 
             <label class="cw-label"><?php esc_html_e('Model', 'claude-writer'); ?></label>
             <select id="cw-model" class="widefat">
+                <?php $gw = CW_Models::gateway(); if ($gw) : ?>
+                <optgroup label="<?php echo esc_attr(CW_Models::gateway_label()); ?>">
+                <?php foreach ($gw as $id => $m) : ?>
+                    <option value="<?php echo esc_attr($id); ?>" <?php selected($id, $default); ?>><?php echo esc_html($m['label'] === $id ? $id : $m['label'] . ' (' . $id . ')'); ?></option>
+                <?php endforeach; ?>
+                </optgroup>
+                <?php else : ?>
                 <optgroup label="OpenAI (GPT)">
                 <?php foreach ($models as $id => $m) : if ($m['provider'] !== 'openai' || !empty($m['gateway'])) { continue; } ?>
                     <option value="<?php echo esc_attr($id); ?>" <?php selected($id, $default); ?>>
                         <?php echo esc_html($m['label'] . ' — ' . $m['tagline']); ?>
                     </option>
-                <?php endforeach; ?>
-                </optgroup>
-                <?php $gw = CW_Models::gateway(); if ($gw) : ?>
-                <optgroup label="<?php echo esc_attr(CW_Models::gateway_label()); ?>">
-                <?php foreach ($gw as $id => $m) : ?>
-                    <option value="<?php echo esc_attr($id); ?>" <?php selected($id, $default); ?>><?php echo esc_html($id); ?></option>
                 <?php endforeach; ?>
                 </optgroup>
                 <?php endif; ?>
