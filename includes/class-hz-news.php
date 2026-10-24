@@ -491,6 +491,10 @@ class HZ_News {
         $system   = self::system_prompt();
         $override = function () use ($system) { return $system; };
         $prompt   = "TITLUL ORIGINAL: " . $art['title'] . "\n\nTEXTUL ORIGINAL:\n" . $art['text'];
+        $cats     = self::site_categories();
+        if ($cats) {
+            $prompt .= "\n\nCATEGORIILE SITE-ULUI (pentru „categorie” alegi UNA, scrisă exact ca aici): " . implode(' | ', $cats);
+        }
 
         // Cu poza originală atașată (doar OpenAI acceptă aici imagine prin URL): modelul o
         // vede ca REFERINȚĂ DE SUBIECT pentru descrierea colajului. Dacă OpenAI nu poate
@@ -541,6 +545,7 @@ class HZ_News {
             'entity'    => isset($j['imagine_subiect']) ? trim(wp_strip_all_tags((string) $j['imagine_subiect'])) : '',
             'img_en'    => isset($j['imagine_en']) ? trim(wp_strip_all_tags((string) $j['imagine_en'])) : '',
             'excerpt'   => isset($j['rezumat']) ? trim(wp_strip_all_tags((string) $j['rezumat'])) : '',
+            'category'  => isset($j['categorie']) ? trim(wp_strip_all_tags((string) $j['categorie'])) : '',
             'model'     => $model,
             'cost'      => isset($result['cost']) ? (float) $result['cost'] : 0.0,
         );
@@ -623,6 +628,7 @@ IEȘIRE: DOAR un obiect JSON valid, fără markdown, cu cheile:
   "titlu": "titlul nou",
   "continut": "HTML cu <p>, <h2>, <ul>, <li>, <strong> (fără <h1>, fără linkuri)",
   "rezumat": "o propoziție de maximum 160 de caractere pentru descriere",
+  "categorie": "categoria site-ului cea mai potrivită știrii, aleasă din lista primită (gol dacă nu ai primit listă)",
   "imagine_subiect": "DOAR numele complet (prenume + nume) al persoanei centrale a știrii, sau numele unei clădiri / unui loc celebru (ex. «Nicușor Dan», «Palatul Parlamentului»); GOL pentru instituții, sigle, firme, acronime (ANRE, ANAF, BNR) sau subiecte generale",
   "imagine_en": "în engleză, compoziția unei imagini de tip COLAJ pentru știre, construită din CONȚINUTUL ei (nu doar din titlu): 1 personaj sau obiect principal în prim-plan + un fundal real din România + un simbol al subiectului (ex. «a Romanian traffic police officer in a fluorescent yellow POLITIA jacket writing a fine, in front of Bucharest communist-era apartment blocks with closed balconies, Romanian flag on a pole»). Dacă știrea e despre persoane reale numite (miniștri, politicieni, vedete), NU pune niciun om în prim-plan: folosești locuri, clădiri, steaguri, obiecte (ex. «Black Sea coast with cargo ships, Romanian and Turkish flags, NATO flag») — o față inventată ar fi luată drept persoana reală. Oameni doar generici (polițist, medic, pensionar), din spate sau în plan îndepărtat. Dacă primești poza originală, o folosești DOAR ca să înțelegi subiectul (locul, obiectele, tipul de persoane): descrii o scenă NOUĂ, cu altă încadrare, nu copia fotografiei."
 }
@@ -641,7 +647,7 @@ TXT;
             'post_excerpt'  => $rw['excerpt'],
             'post_status'   => $status,
             'post_author'   => $this->author_id(),
-            'post_category' => array($this->category_id($section)),
+            'post_category' => array($this->category_id($section, isset($rw['category']) ? $rw['category'] : '')),
         )), true);
         if (is_wp_error($post_id)) { return $post_id; }
 
@@ -859,9 +865,35 @@ TXT;
         return !empty($admins) ? (int) $admins[0] : 0;
     }
 
-    private function category_id($section) {
+    /**
+     * Categoriile site-ului oferite modelului (v3.51.8): fără „Necategorizat" și fără
+     * rubricile automate ale pluginului (horoscop, vreme, articole sponsorizate).
+     */
+    public static function site_categories() {
+        $skip = array('uncategorized', 'fara-categorie', 'necategorizat', 'horoscop', 'vremea', 'articole-sponsorizate');
+        $out  = array();
+        foreach (get_terms(array('taxonomy' => 'category', 'hide_empty' => false, 'number' => 150)) as $t) {
+            if (!($t instanceof WP_Term) || in_array($t->slug, $skip, true) || (int) $t->term_id === (int) get_option('default_category', 0)) { continue; }
+            $out[] = html_entity_decode($t->name, ENT_QUOTES, 'UTF-8');
+        }
+        return array_slice(array_values(array_unique($out)), 0, 100);
+    }
+
+    /**
+     * Categoria articolului: cea aleasă manual pe secțiune; altfel categoria EXISTENTĂ
+     * aleasă de AI din lista site-ului; abia la urmă numele secțiunii (creată la nevoie).
+     */
+    private function category_id($section, $ai_cat = '') {
         $chosen = (int) get_option('hzn_cat_' . $section, 0);
         if ($chosen > 0 && get_term($chosen, 'category') instanceof WP_Term) { return $chosen; }
+        if ($ai_cat !== '') {
+            $want = mb_strtolower(remove_accents($ai_cat));
+            foreach (get_terms(array('taxonomy' => 'category', 'hide_empty' => false, 'number' => 150)) as $t) {
+                if ($t instanceof WP_Term && mb_strtolower(remove_accents(html_entity_decode($t->name, ENT_QUOTES, 'UTF-8'))) === $want) {
+                    return (int) $t->term_id;
+                }
+            }
+        }
         $name = self::sections()[$section]['label'];
         $term = get_term_by('name', $name, 'category');
         if ($term instanceof WP_Term) { return (int) $term->term_id; }
@@ -961,7 +993,7 @@ TXT;
                                     <?php wp_dropdown_categories(array(
                                         'name' => 'hzn_cat_' . $key, 'selected' => (int) get_option('hzn_cat_' . $key, 0),
                                         'hide_empty' => false, 'hierarchical' => true,
-                                        'show_option_none' => sprintf(__('— %s (se creează automat) —', 'horoscop-zilnic'), $s['label']),
+                                        'show_option_none' => __('— automat: AI alege din categoriile site-ului —', 'horoscop-zilnic'),
                                         'option_none_value' => 0,
                                     )); ?>
                                 </p>
