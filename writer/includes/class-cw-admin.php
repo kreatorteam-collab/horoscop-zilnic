@@ -12,6 +12,7 @@ class CW_Admin {
         add_action('admin_enqueue_scripts', array($this, 'enqueue'));
         add_action('wp_ajax_cw_test_key', array($this, 'ajax_test_key'));
         add_action('wp_ajax_cw_test_openai_key', array($this, 'ajax_test_openai_key'));
+        add_action('wp_ajax_cw_list_models', array($this, 'ajax_list_models'));
         add_action('admin_notices', array($this, 'credit_notices'));
 
         // La salvare: dacă e gol (câmp mascat) păstrăm cheia veche; altfel criptăm noua cheie.
@@ -228,6 +229,8 @@ class CW_Admin {
                                 placeholder="<?php echo $has_oai ? esc_attr__('configurată — lipește o cheie nouă doar dacă vrei s-o schimbi', 'claude-writer') : 'sk-proj-...'; ?>" />
                             <button type="button" class="button" id="cw-test-openai-key"><?php esc_html_e('Testează cheia salvată', 'claude-writer'); ?></button>
                             <span id="cw-test-openai-result" class="cw-test-result"></span>
+                            <button type="button" class="button" id="cw-list-models"><?php esc_html_e('Vezi modelele disponibile', 'claude-writer'); ?></button>
+                            <span id="cw-list-models-result" class="cw-test-result" style="display:block;white-space:pre-wrap;margin-top:6px;"></span>
                             <?php if ($has_oai && $is_enc_oai) : ?>
                                 <span class="cw-muted" style="display:block;margin-top:4px;">🔒 <?php esc_html_e('Cheia este stocată criptat (AES-256-GCM).', 'claude-writer'); ?></span>
                             <?php elseif ($has_oai && !$is_enc_oai) : ?>
@@ -414,7 +417,9 @@ class CW_Admin {
                 'content-type'  => 'application/json',
             ),
             'body'    => wp_json_encode(array(
-                'model'                 => 'gpt-5.6-luna',
+                // v3.51.1: modelul implicit al site-ului (dacă e GPT), nu unul fix — un
+                // gateway poate să nu aibă gpt-5.6-luna, iar testul ar pica degeaba.
+                'model'                 => CW_Models::provider(CW_Models::default_model()) === 'openai' ? CW_Models::default_model() : 'gpt-5.4-mini',
                 'max_completion_tokens' => 16,
                 'messages'              => array(array('role' => 'user', 'content' => 'ping')),
             )),
@@ -431,6 +436,45 @@ class CW_Admin {
         $body = json_decode(wp_remote_retrieve_body($response), true);
         $msg  = isset($body['error']['message']) ? $body['error']['message'] : __('Cheie invalidă.', 'claude-writer');
         wp_send_json_error(array('message' => sprintf('(%d) %s', $code, $msg)));
+    }
+
+    /**
+     * v3.51.1: lista modelelor de pe serverul GPT configurat (GET {server}/models), cu
+     * cheia salvată — ca să vezi ce nume de model acceptă un gateway (ex. api.ns.fm).
+     */
+    public function ajax_list_models() {
+        check_ajax_referer('cw_admin_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('message' => __('Permisiune refuzată.', 'claude-writer')));
+        }
+        $key = CW_API::openai_key();
+        if ($key === '') {
+            wp_send_json_error(array('message' => __('Salvează întâi cheia, apoi încearcă.', 'claude-writer')));
+        }
+        $response = wp_remote_get(CW_API::openai_url('models'), array(
+            'headers' => array('Authorization' => 'Bearer ' . $key),
+            'timeout' => 30,
+        ));
+        if (is_wp_error($response)) {
+            wp_send_json_error(array('message' => $response->get_error_message()));
+        }
+        $code = wp_remote_retrieve_response_code($response);
+        $body = json_decode(wp_remote_retrieve_body($response), true);
+        if ($code !== 200 || !isset($body['data']) || !is_array($body['data'])) {
+            $msg = isset($body['error']['message']) ? $body['error']['message'] : __('Serverul nu a întors lista de modele.', 'claude-writer');
+            wp_send_json_error(array('message' => sprintf('(%d) %s', $code, $msg)));
+        }
+        $ids = array();
+        foreach ($body['data'] as $m) {
+            if (is_array($m) && !empty($m['id'])) { $ids[] = (string) $m['id']; }
+        }
+        sort($ids);
+        $known = array_filter($ids, array('CW_Models', 'exists'));
+        wp_send_json_success(array(
+            'message' => sprintf(__('%1$d modele pe %2$s. Recunoscute de plugin: %3$s', 'claude-writer'),
+                count($ids), CW_API::openai_base(), $known ? implode(', ', $known) : __('niciunul', 'claude-writer'))
+                . "\n" . implode(', ', $ids),
+        ));
     }
 
     /* ---- Prompturi implicite ---- */
