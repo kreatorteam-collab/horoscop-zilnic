@@ -120,13 +120,49 @@ class CW_API {
         if (!CW_Models::exists($model_id)) { $model_id = CW_Models::default_model(); }
         $provider = CW_Models::provider($model_id);
         if (self::has_provider_key($provider)) {
-            return $model_id;
+            return $provider === 'openai' ? self::gateway_model($model_id) : $model_id;
         }
         $other = $provider === 'openai' ? 'anthropic' : 'openai';
         if (self::has_provider_key($other)) {
-            return CW_Models::provider_default($other);
+            $fallback = CW_Models::provider_default($other);
+            return $other === 'openai' ? self::gateway_model($fallback) : $fallback;
         }
         return $model_id;
+    }
+
+    /**
+     * v3.53.0: ținem modelul SINCRON cu serverul API configurat (gateway). Un model
+     * care nu mai există pe server (ex. gpt-5-nano rămas în hz_model după mutarea pe
+     * api.ns.fm) ar fi refuzat la FIECARE apel („NOT ALLOWED") — cădem pe modelul
+     * implicit al site-ului dacă e pe server, altfel pe primul model text de acolo.
+     * Garda era doar la Știri (v3.51.4); acum e aici, deci acoperă și horoscopul,
+     * vremea, bulk-ul și editorul. Fără gateway (OpenAI direct) sau cu lista goală
+     * (serverul n-a răspuns încă), nu schimbăm nimic.
+     */
+    public static function gateway_model($model_id) {
+        if (self::openai_base() === self::OPENAI_BASE) { return $model_id; }
+        self::maybe_refresh_gateway_models();
+        $gw = CW_Models::gateway();
+        if (empty($gw) || isset($gw[$model_id])) { return $model_id; }
+        $def = CW_Models::default_model();
+        if (isset($gw[$def])) { return $def; }
+        foreach ($gw as $id => $m) {
+            // Nu cădea pe un model de imagini (ex. cx/gpt-image-2.5-flare).
+            if (stripos($id, 'image') === false) { return $id; }
+        }
+        return $model_id;
+    }
+
+    /**
+     * Lista de modele a serverului se împrospăta DOAR din pagina de setări — pe
+     * site-urile din flotă nu intră nimeni în wp-admin, deci după un push de
+     * `openai_base` din panou lista rămânea goală. O luăm și din cron/REST,
+     * cu același cache ca în admin (12h; 30min la eroare).
+     */
+    private static function maybe_refresh_gateway_models() {
+        if (get_transient('cw_gw_fresh')) { return; }
+        $r = self::refresh_gateway_models();
+        set_transient('cw_gw_fresh', 1, is_wp_error($r) ? 30 * MINUTE_IN_SECONDS : 12 * HOUR_IN_SECONDS);
     }
 
     public static function headers() {

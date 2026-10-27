@@ -19,6 +19,8 @@ if (!defined('ABSPATH')) { exit; }
  *   hz/v1/settings -> suprascrie chei API, cheia Magnific, modelul implicit, limitele
  *   hz/v1/costs    -> cheltuiala AI pe zi, defalcata pe modul si pe model
  *   hz/v1/reimage  -> reface pozele articolelor deja publicate dintr-un lot (alt stil/sursa)
+ *   hz/v1/upgrade  -> v3.53.0: actualizeaza pluginul ACUM din repo-ul GitHub (nu mai
+ *                     astepti auto-update-ul WP, care verifica doar de 2 ori pe zi)
  */
 class HZ_Remote {
 
@@ -30,7 +32,7 @@ class HZ_Remote {
     }
 
     public function register() {
-        $routes = array('info', 'enqueue', 'status', 'control', 'settings', 'rewrite', 'golinks', 'trash', 'costs', 'reimage');
+        $routes = array('info', 'enqueue', 'status', 'control', 'settings', 'rewrite', 'golinks', 'trash', 'costs', 'reimage', 'upgrade');
         foreach ($routes as $route) {
             register_rest_route('hz/v1', '/' . $route, array(
                 'methods'             => 'POST',
@@ -766,5 +768,87 @@ class HZ_Remote {
         }
         return array('ok' => true, 'done' => $out, 'cost' => round($cost, 5),
             'pending' => HZ_Rewrite::count_posts());
+    }
+
+    /**
+     * v3.53.0: actualizează pluginul LA CERERE (butonul „Forțează update plugin"
+     * din Setări flotă). Auto-update-ul WP instalează aceeași versiune singur,
+     * dar abia la următoarea verificare (de 2 ori pe zi) — ruta e pentru „acum".
+     *
+     * Instalăm EXCLUSIV pachetul anunțat în .update-info.json de pe GitHub, și
+     * doar dacă vine din repo-ul pluginului: secretul de deploy singur nu poate
+     * aduce cod din altă parte (același principiu ca allowlist-ul de ZIP-uri din
+     * tema Magpress). Body: { force: bool } — force reinstalează și când site-ul
+     * e deja la zi (rescrie fișierele).
+     */
+    public function handle_upgrade(WP_REST_Request $req) {
+        $data = $this->auth($req);
+        if ($data instanceof WP_REST_Response) { return $data; }
+
+        $updater = new HZ_Updater();
+        $info = $updater->info(true);
+        if (!$info) {
+            return new WP_REST_Response(array('error' => 'no_update_info',
+                'message' => 'Nu am putut citi versiunea publicată pe GitHub.'), 502);
+        }
+        $remote = (string) $info['version'];
+        if (empty($data['force']) && !version_compare(HZ_VERSION, $remote, '<')) {
+            return array('ok' => true, 'updated' => false, 'version' => HZ_VERSION, 'remote' => $remote);
+        }
+
+        $package = (string) $info['package'];
+        if (!preg_match('#^https://(github\.com|codeload\.github\.com)/kreatorteam-collab/horoscop-zilnic/#i', $package)) {
+            return new WP_REST_Response(array('error' => 'bad_package',
+                'message' => 'Pachetul anunțat nu vine din repo-ul pluginului.'), 400);
+        }
+
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+        require_once ABSPATH . 'wp-admin/includes/misc.php';
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+
+        add_filter('filesystem_method', function () { return 'direct'; });
+        if (!WP_Filesystem()) {
+            return new WP_REST_Response(array('error' => 'filesystem_unavailable'), 500);
+        }
+
+        @ignore_user_abort(true);
+        if (function_exists('set_time_limit')) { @set_time_limit(180); }
+
+        // install + overwrite_package suprascrie pluginul ACTIV (fix_source din
+        // HZ_Updater redenumește folderul „horoscop-zilnic-main" din zip); starea
+        // de activare nu se atinge, codul vechi rulează până la finalul cererii.
+        $skin     = new Automatic_Upgrader_Skin();
+        $upgrader = new Plugin_Upgrader($skin);
+        $result   = $upgrader->install($package, array('overwrite_package' => true));
+
+        if (is_wp_error($result)) {
+            return new WP_REST_Response(array('error' => 'install_failed',
+                'message' => $result->get_error_message()), 500);
+        }
+        if (!$result) {
+            $errs = $skin->get_errors();
+            $msg  = (is_wp_error($errs) && $errs->has_errors()) ? $errs->get_error_message() : 'install_failed';
+            return new WP_REST_Response(array('error' => 'install_failed', 'message' => $msg), 500);
+        }
+
+        if (function_exists('opcache_reset')) { @opcache_reset(); }
+
+        // Plasă de siguranță: dacă suprascrierea a lăsat pluginul dezactivat, îl
+        // reactivăm (include_once pe același fișier deja încărcat = no-op, fără
+        // redeclarare de clase în cererea curentă).
+        $basename = 'horoscop-zilnic/horoscop-zilnic.php';
+        if (function_exists('is_plugin_active') && !is_plugin_active($basename)) {
+            activate_plugin($basename);
+        }
+
+        // Versiunea NOUĂ e în fișierul abia scris (constanta HZ_VERSION e cea veche).
+        $ver  = $remote;
+        $file = WP_PLUGIN_DIR . '/' . $basename;
+        if (file_exists($file)) {
+            $hdr = get_plugin_data($file, false, false);
+            if (!empty($hdr['Version'])) { $ver = (string) $hdr['Version']; }
+        }
+        return array('ok' => true, 'updated' => true, 'from' => HZ_VERSION, 'version' => $ver);
     }
 }
