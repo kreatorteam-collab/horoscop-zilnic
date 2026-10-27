@@ -496,15 +496,9 @@ class HZ_News {
     public static function effective_model() {
         $model = (string) get_option('hzn_model', self::DEFAULT_MODEL);
         if (!CW_Models::exists($model)) { $model = self::DEFAULT_MODEL; }
-        // v3.51.4: cu server API (ex. creator.ms) modelul trebuie să existe PE server;
-        // altfel cădem pe modelul implicit al site-ului (sau primul de pe server).
-        $gw = CW_Models::gateway();
-        if ($gw && CW_Models::provider($model) === 'openai' && !isset($gw[$model])) {
-            $def   = CW_Models::default_model();
-            $model = isset($gw[$def]) ? $def : (string) key($gw);
-        }
-        $model = CW_API::resolve_model($model);
-        return $model;
+        // v3.53.0: corecția pe serverul API (fosta gardă v3.51.4 de aici) e acum
+        // centrală, în CW_API::resolve_model — acoperă și horoscopul/vremea/bulk-ul.
+        return CW_API::resolve_model($model);
     }
 
     /** Temele care NU se preiau (v3.52.1), din setarea `hzn_exclude` (listă cu virgulă). */

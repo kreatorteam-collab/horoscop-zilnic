@@ -68,7 +68,14 @@ class HZ_Weather {
             }
             return;
         }
-        if (!wp_next_scheduled(self::HOOK)) {
+        $next = wp_next_scheduled(self::HOOK);
+        // v3.53.0: la schimbarea orei (DST) evenimentul „daily" (interval fix 86400s)
+        // alunecă cu o oră față de ora locală configurată — reprogramăm (ca la horoscop).
+        if ($next && (int) wp_date('G', $next) !== max(0, min(23, (int) get_option('hzw_hour', 8)))) {
+            wp_clear_scheduled_hook(self::HOOK);
+            $next = false;
+        }
+        if (!$next) {
             wp_schedule_event($this->next_run_ts(), 'daily', self::HOOK);
         }
     }
@@ -157,10 +164,9 @@ class HZ_Weather {
         $prompt = str_replace(array('{{data}}', '{{zi}}'), array($data_afisata, $zi), $prompt);
         $prompt .= "\n\n" . $data_block;
 
-        $model = (string) get_option('hzw_model', '');
-        if ($model === '' || !CW_Models::exists($model)) {
-            $model = CW_Models::default_model();
-        }
+        // v3.53.0: prin resolve_model, ca modelul să rămână sincron cu serverul API
+        // (gateway) împins din panou — un model inexistent acolo cade pe unul valid.
+        $model = CW_API::resolve_model((string) get_option('hzw_model', ''));
 
         $system = trim((string) get_option('hzw_system_prompt', ''));
         if ($system === '') {
