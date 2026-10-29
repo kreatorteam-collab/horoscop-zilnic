@@ -250,7 +250,7 @@ class HZ_News {
                 continue;
             }
 
-            // Clasificarea rulează mereu (v3.52.2): pe lângă categorie și temele excluse,
+            // Clasificarea rulează mereu (v3.53.1): pe lângă categorie și temele excluse,
             // respinge tot ce nu e știre (advertoriale, texte promoționale).
             $cat = '';
             $res = $this->classify($art, (bool) $auto);
@@ -393,7 +393,7 @@ class HZ_News {
         $paras = array_values(array_filter($paras, array($this, 'keep_paragraph')));
         $text  = implode("\n\n", $paras);
 
-        // v3.52.2: DOAR știri. Advertorialele / articolele plătite NU se preiau niciodată.
+        // v3.53.1: DOAR știri. Advertorialele / articolele plătite NU se preiau niciodată.
         if ($this->is_advertorial($xp, $url, $title, $text)) {
             return new WP_Error('hzn_advertorial', 'Advertorial / conținut plătit - nu se preia.');
         }
@@ -524,15 +524,9 @@ class HZ_News {
     public static function effective_model() {
         $model = (string) get_option('hzn_model', self::DEFAULT_MODEL);
         if (!CW_Models::exists($model)) { $model = self::DEFAULT_MODEL; }
-        // v3.51.4: cu server API (ex. creator.ms) modelul trebuie să existe PE server;
-        // altfel cădem pe modelul implicit al site-ului (sau primul de pe server).
-        $gw = CW_Models::gateway();
-        if ($gw && CW_Models::provider($model) === 'openai' && !isset($gw[$model])) {
-            $def   = CW_Models::default_model();
-            $model = isset($gw[$def]) ? $def : (string) key($gw);
-        }
-        $model = CW_API::resolve_model($model);
-        return $model;
+        // v3.53.0: corecția pe serverul API (fosta gardă v3.51.4 de aici) e acum
+        // centrală, în CW_API::resolve_model — acoperă și horoscopul/vremea/bulk-ul.
+        return CW_API::resolve_model($model);
     }
 
     /** Temele care NU se preiau (v3.52.1), din setarea `hzn_exclude` (listă cu virgulă). */
@@ -580,7 +574,7 @@ class HZ_News {
         $topics = self::excluded_topics();
         $model  = self::effective_model();
         $prompt = "Știre:\nTITLU: " . $art['title'] . "\nÎNCEPUT: " . mb_substr($art['text'], 0, 700);
-        // v3.52.2: se preiau DOAR știri. Advertorialele și textele promoționale se sar.
+        // v3.53.1: se preiau DOAR știri. Advertorialele și textele promoționale se sar.
         $prompt .= "\n\nDacă textul NU e o știre (advertorial, articol plătit sau sponsorizat, comunicat de presă al unei firme, "
                  . "prezentare de produs / serviciu / aplicație, ghid sau sfaturi de cumpărare cu scop comercial), răspunde NICIUNA.";
         if ($topics) {

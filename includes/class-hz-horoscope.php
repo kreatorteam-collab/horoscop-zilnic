@@ -34,7 +34,16 @@ class HZ_Horoscope {
             }
             return;
         }
-        if (!wp_next_scheduled(self::HOOK)) {
+        $next = wp_next_scheduled(self::HOOK);
+        // v3.53.0: evenimentul „daily" al WP e un interval fix de 86400s, deci la
+        // schimbarea orei (DST) alunecă cu o oră față de ora locală configurată
+        // (cronul de 7:00 fixat vara ajungea să ruleze la 6:00 iarna). Dacă
+        // următoarea rulare nu mai pică la ora setată, reprogramăm.
+        if ($next && (int) wp_date('G', $next) !== max(0, min(23, (int) get_option('hz_hour', 7)))) {
+            wp_clear_scheduled_hook(self::HOOK);
+            $next = false;
+        }
+        if (!$next) {
             wp_schedule_event($this->next_run_ts(), 'daily', self::HOOK);
         }
     }
@@ -128,10 +137,9 @@ class HZ_Horoscope {
             }
         }
 
-        $model = (string) get_option('hz_model', '');
-        if ($model === '' || !CW_Models::exists($model)) {
-            $model = CW_Models::default_model();
-        }
+        // v3.53.0: prin resolve_model, ca modelul să rămână sincron cu serverul API
+        // (gateway) împins din panou — un model inexistent acolo cade pe unul valid.
+        $model = CW_API::resolve_model((string) get_option('hz_model', ''));
 
         // Înlocuim system promptul de articole din Claude Writer cu cel de horoscop,
         // DOAR pentru acest apel (necesită Claude Writer 1.3.3+; pe versiuni mai vechi

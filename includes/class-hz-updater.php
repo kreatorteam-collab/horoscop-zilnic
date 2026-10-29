@@ -39,6 +39,15 @@ class HZ_Updater {
         return $update;
     }
 
+    /**
+     * Info-ul publicat pe GitHub (versiune + pachet), pentru ruta hz/v1/upgrade
+     * (update forțat din panou). Nu are nevoie de init() — fetch_info e de sine
+     * stătător.
+     */
+    public function info($bust = false) {
+        return $this->fetch_info($bust);
+    }
+
     /** Citește info-ul de pe GitHub (cache 1h). Returnează array sau false. */
     private function fetch_info($bust = false) {
         if (!$bust) {
