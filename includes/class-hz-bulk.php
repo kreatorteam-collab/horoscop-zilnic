@@ -15,6 +15,12 @@ class HZ_Bulk {
 
     const HOOK = 'hz_bulk_process';
     const LOCK = 'hz_bulk_lock';
+    /* v3.53.2: de câte ori lăsăm un articol să-și OMOARE rularea (timeout / memorie pe
+     * server, worker ucis) înainte să-l marcăm „eroare" și să trecem mai departe.
+     * Înainte, un asemenea articol era reluat la nesfârșit (recuperare la 20 min -> aceeași
+     * moarte -> recuperare...) și ținea pe loc TOATĂ coada site-ului: loturile din spate
+     * stăteau la 0/20 fără niciun mesaj, iar fiecare reluare plătea din nou textul. */
+    const MAX_RUNS = 2;
     const WATCHDOG = 'hz_bulk_watchdog';
 
     public function init() {
@@ -454,7 +460,7 @@ class HZ_Bulk {
                     // Scopat pe lot cand ni se cere: reluam doar articolele cu problema
                     // din lotul din care s-a apasat butonul.
                     $inBatch = ($batch === '' || (isset($item['b']) && $item['b'] === $batch));
-                    if ($item['s'] === 'error' && $inBatch) { $item['s'] = 'pending'; $item['err'] = ''; $n++; }
+                    if ($item['s'] === 'error' && $inBatch) { $item['s'] = 'pending'; $item['err'] = ''; unset($item['runs']); $n++; }
                     if ($item['s'] === 'pending') { $pending++; }
                 }
                 unset($item);
@@ -726,6 +732,7 @@ class HZ_Bulk {
             if ($item['s'] === 'error') {
                 $item['s']   = 'pending';
                 $item['err'] = '';
+                unset($item['runs']); // v3.53.2: reluare explicită = contor de rulări moarte de la zero
                 $n++;
             }
         }
@@ -780,6 +787,21 @@ class HZ_Bulk {
                 $cand[] = $i;
             }
         }
+        // v3.53.2: un articol care și-a omorât rularea de MAX_RUNS ori nu se mai reia:
+        // devine „eroare" (cu motivul), ca restul cozii să meargă mai departe. Userul îl
+        // poate relua explicit cu „Reîncearcă" (care resetează contorul).
+        $dead = 0;
+        foreach ($cand as $k => $i) {
+            if ((int) ($q[$i]['runs'] ?? 0) < self::MAX_RUNS) { continue; }
+            $q[$i]['s']   = 'error';
+            $q[$i]['err'] = sprintf('Rularea a murit de %d ori (timeout sau memorie pe server, la generare/poze). Articolul a fost sărit ca să nu țină coada pe loc; „Reîncearcă" îl reia.', (int) $q[$i]['runs']);
+            unset($cand[$k]);
+            $dead++;
+        }
+        if ($dead > 0) {
+            $cand = array_values($cand);
+            $this->save_queue($q);
+        }
         if (!$cand) {
             // Nimic de scris = niciun blocaj activ. Fara asta, motivul ramanea agatat
             // pe site dupa ce itemii blocati erau terminati sau sterși.
@@ -830,14 +852,22 @@ class HZ_Bulk {
 
         $q[$idx]['s']       = 'working';
         $q[$idx]['started'] = time(); // v3.4.8: de aici se măsoară „prea vechi = reia"
+        // v3.53.2: a câta rulare e pentru articolul ăsta. Rămâne pe item dacă rularea
+        // moare, deci la a MAX_RUNS+1-a luare îl trecem pe „eroare" (vezi mai sus).
+        $q[$idx]['runs']    = (int) ($q[$idx]['runs'] ?? 0) + 1;
         $this->save_queue($q);
 
         $result = $this->process_item($q[$idx]);
+        unset($result['runs']); // s-a terminat (done/error/pending cu text păstrat): contorul nu mai e necesar
 
         // Recitim coada: între timp userul poate a adăugat/șters itemi.
+        // v3.53.2: itemul se caută după identitate (lot + titlu), NU după poziție: dacă
+        // între timp s-a anulat/șters un lot din față, pozițiile s-au mutat și scriam
+        // rezultatul peste ALT articol (care se pierdea), iar al nostru rămânea „în lucru".
         $q = $this->queue();
-        if (isset($q[$idx])) {
-            $q[$idx] = $result;
+        $at = $this->find_index($q, $result, $idx);
+        if ($at !== null) {
+            $q[$at] = $result;
             $this->save_queue($q);
         }
 
@@ -856,6 +886,24 @@ class HZ_Bulk {
 
     /* Nota itemului spune mereu CE s-a întâmplat cu imaginile — un articol fără
      * poză nu e o eroare a articolului, dar motivul trebuie să fie vizibil în coadă. */
+
+    /**
+     * Poziția unui item în coada (recitită) după lot + titlu normalizat. $hint = poziția
+     * de dinainte de procesare, încercată prima (cazul obișnuit: nimic nu s-a mutat).
+     * @return int|null
+     */
+    private function find_index(array $q, array $item, $hint = null) {
+        $same = function ($cand) use ($item) {
+            return is_array($cand)
+                && (string) ($cand['b'] ?? '') === (string) ($item['b'] ?? '')
+                && $this->norm_title((string) ($cand['t'] ?? '')) === $this->norm_title((string) ($item['t'] ?? ''));
+        };
+        if ($hint !== null && isset($q[$hint]) && $same($q[$hint])) { return (int) $hint; }
+        foreach ($q as $i => $cand) {
+            if ($same($cand)) { return (int) $i; }
+        }
+        return null;
+    }
 
     /** Procesează un item: generare articol + imagini. Returnează itemul actualizat. */
     private function process_item($item) {
