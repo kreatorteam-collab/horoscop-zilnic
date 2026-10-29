@@ -90,7 +90,12 @@ class HZ_Bulk {
      */
     private function kick($delay = 1) {
         if ((int) get_option('hzb_stopped', 0)) { return; } // oprit de user
-        $when = time() + max(1, (int) $delay);
+        // v3.53.2: „acum" înseamnă SCADENT acum (time()-1), nu peste o secundă. Un event
+        // la time()+1 nu e „ready" pentru spawn_cron() și nici pentru hit-ul pe wp-cron.php
+        // dat de panou imediat după trimitere, deci articolul pornea abia la URMĂTORUL
+        // ghiont (poll-ul de status sau cronul driver, 2-3 minute mai târziu). Pe site-urile
+        // cu DISABLE_WP_CRON asta dubla timpul per articol.
+        $when = ((int) $delay < 5) ? time() - 1 : time() + (int) $delay; // 1-2 = „acum"; gap-ul (>= 5) rămâne
         $next = wp_next_scheduled(self::HOOK);
         if ($next && $next > $when + 60) {
             wp_unschedule_event($next, self::HOOK);
