@@ -766,7 +766,9 @@ class HZ_Bulk {
 
     /* ---- Procesare (un articol per rulare de cron) ---- */
 
-    public function process_tick() {
+    public function process_tick($t_start = null) {
+        // v3.53.2: bugetul lanțului (vezi chain()). Din do_action vine '' ca argument, nu null.
+        if (!is_float($t_start) && !is_int($t_start)) { $t_start = microtime(true); }
         if ((int) get_option('hzb_stopped', 0)) { return; }
         if (get_transient(self::LOCK)) { return; }
         if (!class_exists('CW_API') || !CW_API::has_key()) { return; }
@@ -892,11 +894,51 @@ class HZ_Bulk {
         // articole setată de user (ritm natural de publicare + menajează API-urile).
         foreach ($this->queue() as $item) {
             if ($item['s'] === 'pending') {
-                $gap = (int) get_option('hzb_gap', 120);
-                $this->kick(max(5, min(3600, $gap)));
+                $gap = max(5, min(3600, (int) get_option('hzb_gap', 120)));
+                $this->kick($gap); // eventul programat rămâne plasa de siguranță (cronul extern)
+                $this->chain($gap, $t_start);
                 break;
             }
         }
+    }
+
+    /**
+     * v3.53.2: coada se ALIMENTEAZĂ SINGURĂ. Până acum, după un articol doar programam
+     * eventul următor peste `gap` secunde — dar pe site-urile cu DISABLE_WP_CRON nimic
+     * nu-l pornea la ora lui: articolul următor pleca abia când ceva din afară lovea
+     * wp-cron (poll-ul din „Vezi progres", cronul driver de pe panou, un vizitator).
+     * Cu panoul închis și fără cron extern, 20 de articole durau ore sau stăteau.
+     *
+     * Acum, în același proces: așteptăm pauza, apoi luăm articolul următor direct (cât
+     * timp încăpem în buget), iar la capătul bugetului pornim NOI un wp-cron.php nou
+     * (spawn_cron() refuză să se apeleze din wp-cron.php). Pauzele lungi (> 3 min) le
+     * lăsăm cronului extern, ca să nu ținem un proces PHP degeaba.
+     */
+    private function chain($gap, $t_start) {
+        if ($gap > 180) { return; }
+        if (!apply_filters('hzb_chain', true)) { return; }
+        if ((int) get_option('hzb_stopped', 0)) { return; }
+        sleep((int) $gap);
+        if ((int) get_option('hzb_stopped', 0)) { return; }
+        if (get_transient(self::LOCK)) { return; } // altă rulare a luat deja articolul următor
+        $budget = (int) apply_filters('hzb_chain_budget', 8 * MINUTE_IN_SECONDS);
+        if ((microtime(true) - $t_start) < $budget) {
+            $this->process_tick($t_start);
+            return;
+        }
+        $this->kick(1);      // eventul scadent ACUM
+        $this->self_spawn(); // + procesul care să-l ruleze
+    }
+
+    /** Pornește un wp-cron.php nou (ca spawn_cron(), dar merge și din interiorul lui wp-cron.php). */
+    private function self_spawn() {
+        $key = sprintf('%.22F', microtime(true));
+        set_transient('doing_cron', $key);
+        wp_remote_post(add_query_arg('doing_wp_cron', $key, site_url('wp-cron.php')), array(
+            'timeout'   => 0.01,
+            'blocking'  => false,
+            'sslverify' => apply_filters('https_local_ssl_verify', false),
+        ));
     }
 
     /* Nota itemului spune mereu CE s-a întâmplat cu imaginile — un articol fără
