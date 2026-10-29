@@ -15,6 +15,12 @@ class HZ_Bulk {
 
     const HOOK = 'hz_bulk_process';
     const LOCK = 'hz_bulk_lock';
+    /* v3.53.2: de câte ori lăsăm un articol să-și OMOARE rularea (timeout / memorie pe
+     * server, worker ucis) înainte să-l marcăm „eroare" și să trecem mai departe.
+     * Înainte, un asemenea articol era reluat la nesfârșit (recuperare la 20 min -> aceeași
+     * moarte -> recuperare...) și ținea pe loc TOATĂ coada site-ului: loturile din spate
+     * stăteau la 0/20 fără niciun mesaj, iar fiecare reluare plătea din nou textul. */
+    const MAX_RUNS = 2;
     const WATCHDOG = 'hz_bulk_watchdog';
 
     public function init() {
@@ -84,7 +90,12 @@ class HZ_Bulk {
      */
     private function kick($delay = 1) {
         if ((int) get_option('hzb_stopped', 0)) { return; } // oprit de user
-        $when = time() + max(1, (int) $delay);
+        // v3.53.2: „acum" înseamnă SCADENT acum (time()-1), nu peste o secundă. Un event
+        // la time()+1 nu e „ready" pentru spawn_cron() și nici pentru hit-ul pe wp-cron.php
+        // dat de panou imediat după trimitere, deci articolul pornea abia la URMĂTORUL
+        // ghiont (poll-ul de status sau cronul driver, 2-3 minute mai târziu). Pe site-urile
+        // cu DISABLE_WP_CRON asta dubla timpul per articol.
+        $when = ((int) $delay < 5) ? time() - 1 : time() + (int) $delay; // 1-2 = „acum"; gap-ul (>= 5) rămâne
         $next = wp_next_scheduled(self::HOOK);
         if ($next && $next > $when + 60) {
             wp_unschedule_event($next, self::HOOK);
@@ -454,7 +465,7 @@ class HZ_Bulk {
                     // Scopat pe lot cand ni se cere: reluam doar articolele cu problema
                     // din lotul din care s-a apasat butonul.
                     $inBatch = ($batch === '' || (isset($item['b']) && $item['b'] === $batch));
-                    if ($item['s'] === 'error' && $inBatch) { $item['s'] = 'pending'; $item['err'] = ''; $n++; }
+                    if ($item['s'] === 'error' && $inBatch) { $item['s'] = 'pending'; $item['err'] = ''; unset($item['runs']); $n++; }
                     if ($item['s'] === 'pending') { $pending++; }
                 }
                 unset($item);
@@ -726,6 +737,7 @@ class HZ_Bulk {
             if ($item['s'] === 'error') {
                 $item['s']   = 'pending';
                 $item['err'] = '';
+                unset($item['runs']); // v3.53.2: reluare explicită = contor de rulări moarte de la zero
                 $n++;
             }
         }
@@ -754,7 +766,9 @@ class HZ_Bulk {
 
     /* ---- Procesare (un articol per rulare de cron) ---- */
 
-    public function process_tick() {
+    public function process_tick($t_start = null) {
+        // v3.53.2: bugetul lanțului (vezi chain()). Din do_action vine '' ca argument, nu null.
+        if (!is_float($t_start) && !is_int($t_start)) { $t_start = microtime(true); }
         if ((int) get_option('hzb_stopped', 0)) { return; }
         if (get_transient(self::LOCK)) { return; }
         if (!class_exists('CW_API') || !CW_API::has_key()) { return; }
@@ -779,6 +793,21 @@ class HZ_Bulk {
             if ($item['s'] === 'working' && (!$started || (time() - $started) > 20 * MINUTE_IN_SECONDS)) {
                 $cand[] = $i;
             }
+        }
+        // v3.53.2: un articol care și-a omorât rularea de MAX_RUNS ori nu se mai reia:
+        // devine „eroare" (cu motivul), ca restul cozii să meargă mai departe. Userul îl
+        // poate relua explicit cu „Reîncearcă" (care resetează contorul).
+        $dead = 0;
+        foreach ($cand as $k => $i) {
+            if ((int) ($q[$i]['runs'] ?? 0) < self::MAX_RUNS) { continue; }
+            $q[$i]['s']   = 'error';
+            $q[$i]['err'] = sprintf('Rularea a murit de %d ori (timeout sau memorie pe server, la generare/poze). Articolul a fost sărit ca să nu țină coada pe loc; „Reîncearcă" îl reia.', (int) $q[$i]['runs']);
+            unset($cand[$k]);
+            $dead++;
+        }
+        if ($dead > 0) {
+            $cand = array_values($cand);
+            $this->save_queue($q);
         }
         if (!$cand) {
             // Nimic de scris = niciun blocaj activ. Fara asta, motivul ramanea agatat
@@ -830,14 +859,32 @@ class HZ_Bulk {
 
         $q[$idx]['s']       = 'working';
         $q[$idx]['started'] = time(); // v3.4.8: de aici se măsoară „prea vechi = reia"
+        // v3.53.2: a câta rulare e pentru articolul ăsta. Rămâne pe item dacă rularea
+        // moare, deci la a MAX_RUNS+1-a luare îl trecem pe „eroare" (vezi mai sus).
+        $q[$idx]['runs']    = (int) ($q[$idx]['runs'] ?? 0) + 1;
         $this->save_queue($q);
 
+        $t0     = microtime(true);
         $result = $this->process_item($q[$idx]);
+        unset($result['runs']);
+        // v3.53.2: cât a durat articolul (generare + poze + publicare) și pe ce model a
+        // mers, în nota din panou. Fără asta nu se vede dacă un lot e lent din cauza
+        // API-ului (gateway, model căzut pe altul) sau a cronului care nu-l pornește.
+        if (isset($result['s']) && $result['s'] === 'done' && empty($result['dur_noted'])) {
+            $secs  = (int) round(microtime(true) - $t0);
+            $model = class_exists('CW_API') ? (string) CW_API::resolve_model((string) ($result['model'] ?? '')) : '';
+            $stamp = ($model !== '' ? $model . ' · ' : '') . $secs . 's';
+            $result['note'] = $stamp . ((string) ($result['note'] ?? '') !== '' ? ' · ' . $result['note'] : '');
+        } // s-a terminat (done/error/pending cu text păstrat): contorul nu mai e necesar
 
         // Recitim coada: între timp userul poate a adăugat/șters itemi.
+        // v3.53.2: itemul se caută după identitate (lot + titlu), NU după poziție: dacă
+        // între timp s-a anulat/șters un lot din față, pozițiile s-au mutat și scriam
+        // rezultatul peste ALT articol (care se pierdea), iar al nostru rămânea „în lucru".
         $q = $this->queue();
-        if (isset($q[$idx])) {
-            $q[$idx] = $result;
+        $at = $this->find_index($q, $result, $idx);
+        if ($at !== null) {
+            $q[$at] = $result;
             $this->save_queue($q);
         }
 
@@ -847,15 +894,73 @@ class HZ_Bulk {
         // articole setată de user (ritm natural de publicare + menajează API-urile).
         foreach ($this->queue() as $item) {
             if ($item['s'] === 'pending') {
-                $gap = (int) get_option('hzb_gap', 120);
-                $this->kick(max(5, min(3600, $gap)));
+                $gap = max(5, min(3600, (int) get_option('hzb_gap', 120)));
+                $this->kick($gap); // eventul programat rămâne plasa de siguranță (cronul extern)
+                $this->chain($gap, $t_start);
                 break;
             }
         }
     }
 
+    /**
+     * v3.53.2: coada se ALIMENTEAZĂ SINGURĂ. Până acum, după un articol doar programam
+     * eventul următor peste `gap` secunde — dar pe site-urile cu DISABLE_WP_CRON nimic
+     * nu-l pornea la ora lui: articolul următor pleca abia când ceva din afară lovea
+     * wp-cron (poll-ul din „Vezi progres", cronul driver de pe panou, un vizitator).
+     * Cu panoul închis și fără cron extern, 20 de articole durau ore sau stăteau.
+     *
+     * Acum, în același proces: așteptăm pauza, apoi luăm articolul următor direct (cât
+     * timp încăpem în buget), iar la capătul bugetului pornim NOI un wp-cron.php nou
+     * (spawn_cron() refuză să se apeleze din wp-cron.php). Pauzele lungi (> 3 min) le
+     * lăsăm cronului extern, ca să nu ținem un proces PHP degeaba.
+     */
+    private function chain($gap, $t_start) {
+        if ($gap > 180) { return; }
+        if (!apply_filters('hzb_chain', true)) { return; }
+        if ((int) get_option('hzb_stopped', 0)) { return; }
+        sleep((int) $gap);
+        if ((int) get_option('hzb_stopped', 0)) { return; }
+        if (get_transient(self::LOCK)) { return; } // altă rulare a luat deja articolul următor
+        $budget = (int) apply_filters('hzb_chain_budget', 8 * MINUTE_IN_SECONDS);
+        if ((microtime(true) - $t_start) < $budget) {
+            $this->process_tick($t_start);
+            return;
+        }
+        $this->kick(1);      // eventul scadent ACUM
+        $this->self_spawn(); // + procesul care să-l ruleze
+    }
+
+    /** Pornește un wp-cron.php nou (ca spawn_cron(), dar merge și din interiorul lui wp-cron.php). */
+    private function self_spawn() {
+        $key = sprintf('%.22F', microtime(true));
+        set_transient('doing_cron', $key);
+        wp_remote_post(add_query_arg('doing_wp_cron', $key, site_url('wp-cron.php')), array(
+            'timeout'   => 0.01,
+            'blocking'  => false,
+            'sslverify' => apply_filters('https_local_ssl_verify', false),
+        ));
+    }
+
     /* Nota itemului spune mereu CE s-a întâmplat cu imaginile — un articol fără
      * poză nu e o eroare a articolului, dar motivul trebuie să fie vizibil în coadă. */
+
+    /**
+     * Poziția unui item în coada (recitită) după lot + titlu normalizat. $hint = poziția
+     * de dinainte de procesare, încercată prima (cazul obișnuit: nimic nu s-a mutat).
+     * @return int|null
+     */
+    private function find_index(array $q, array $item, $hint = null) {
+        $same = function ($cand) use ($item) {
+            return is_array($cand)
+                && (string) ($cand['b'] ?? '') === (string) ($item['b'] ?? '')
+                && $this->norm_title((string) ($cand['t'] ?? '')) === $this->norm_title((string) ($item['t'] ?? ''));
+        };
+        if ($hint !== null && isset($q[$hint]) && $same($q[$hint])) { return (int) $hint; }
+        foreach ($q as $i => $cand) {
+            if ($same($cand)) { return (int) $i; }
+        }
+        return null;
+    }
 
     /** Procesează un item: generare articol + imagini. Returnează itemul actualizat. */
     private function process_item($item) {
