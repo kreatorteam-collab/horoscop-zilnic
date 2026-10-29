@@ -862,8 +862,18 @@ class HZ_Bulk {
         $q[$idx]['runs']    = (int) ($q[$idx]['runs'] ?? 0) + 1;
         $this->save_queue($q);
 
+        $t0     = microtime(true);
         $result = $this->process_item($q[$idx]);
-        unset($result['runs']); // s-a terminat (done/error/pending cu text păstrat): contorul nu mai e necesar
+        unset($result['runs']);
+        // v3.53.2: cât a durat articolul (generare + poze + publicare) și pe ce model a
+        // mers, în nota din panou. Fără asta nu se vede dacă un lot e lent din cauza
+        // API-ului (gateway, model căzut pe altul) sau a cronului care nu-l pornește.
+        if (isset($result['s']) && $result['s'] === 'done' && empty($result['dur_noted'])) {
+            $secs  = (int) round(microtime(true) - $t0);
+            $model = class_exists('CW_API') ? (string) CW_API::resolve_model((string) ($result['model'] ?? '')) : '';
+            $stamp = ($model !== '' ? $model . ' · ' : '') . $secs . 's';
+            $result['note'] = $stamp . ((string) ($result['note'] ?? '') !== '' ? ' · ' . $result['note'] : '');
+        } // s-a terminat (done/error/pending cu text păstrat): contorul nu mai e necesar
 
         // Recitim coada: între timp userul poate a adăugat/șters itemi.
         // v3.53.2: itemul se caută după identitate (lot + titlu), NU după poziție: dacă
