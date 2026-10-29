@@ -250,19 +250,19 @@ class HZ_News {
                 continue;
             }
 
+            // Clasificarea rulează mereu (v3.53.1): pe lângă categorie și temele excluse,
+            // respinge tot ce nu e știre (advertoriale, texte promoționale).
             $cat = '';
-            if ($auto || self::excluded_topics()) {
-                $res = $this->classify($art, (bool) $auto);
-                if (is_wp_error($res)) {
-                    if (in_array($res->get_error_code(), array('cw_no_key', 'cw_limit', 'cw_api', 'cw_http'), true)) { return $res; }
-                    $res = '';
-                }
-                if ($res === '') {
-                    $this->mark_seen($url, 'exclus_sau_fara_categorie');
-                    continue;
-                }
-                if ($auto) { $cat = $res; }
+            $res = $this->classify($art, (bool) $auto);
+            if (is_wp_error($res)) {
+                if (in_array($res->get_error_code(), array('cw_no_key', 'cw_limit', 'cw_api', 'cw_http'), true)) { return $res; }
+                $res = '';
             }
+            if ($res === '') {
+                $this->mark_seen($url, 'exclus_sau_fara_categorie');
+                continue;
+            }
+            if ($auto) { $cat = $res; }
 
             $tries++;
             $rw = $this->rewrite($art, $cat);
@@ -393,6 +393,11 @@ class HZ_News {
         $paras = array_values(array_filter($paras, array($this, 'keep_paragraph')));
         $text  = implode("\n\n", $paras);
 
+        // v3.53.1: DOAR știri. Advertorialele / articolele plătite NU se preiau niciodată.
+        if ($this->is_advertorial($xp, $url, $title, $text)) {
+            return new WP_Error('hzn_advertorial', 'Advertorial / conținut plătit - nu se preia.');
+        }
+
         if ($title === '' || mb_strlen($text) < 600) {
             return new WP_Error('hzn_short', 'Text prea scurt (probabil video sau live).');
         }
@@ -405,6 +410,29 @@ class HZ_News {
 
         return array('url' => $url, 'title' => $title, 'text' => $text, 'image' => $image,
                      'image_credit' => $this->photo_credit($xp, $html), 'published' => $ts ? (int) $ts : 0);
+    }
+
+    /**
+     * Advertorial / conținut plătit? Marcajele folosite de redacții: „(P)" în titlu,
+     * rubrica sau etichetele de tip advertorial / sponsorizat / publicitate, adresa
+     * paginii și mențiunile din text („articol susținut de", „comunicat de presă").
+     */
+    private function is_advertorial(DOMXPath $xp, $url, $title, $text) {
+        if (preg_match('/(^|\s)\((P|PR|A|AD)\)(\s|$)/u', $title)) { return true; }
+        $words = '(advertorial|sponsorizat|sponsored|publireportaj|continut[\s\-]+platit|branded[\s\-]+content)';
+        $path  = remove_accents(mb_strtolower((string) wp_parse_url($url, PHP_URL_PATH)));
+        if (preg_match('#' . $words . '#', $path)) { return true; }
+        $labels = array($this->meta($xp, 'article:section'), $this->meta($xp, 'article:tag'), $this->meta($xp, 'keywords'), $this->meta($xp, 'news_keywords'));
+        foreach ($xp->query('//script[@type="application/ld+json"]') as $s) {
+            if (preg_match_all('/"(?:articleSection|keywords|genre)"\s*:\s*("[^"]*"|\[[^\]]*\])/u', $s->textContent, $m)) {
+                $labels = array_merge($labels, $m[1]);
+            }
+        }
+        if (preg_match('#' . $words . '#', remove_accents(mb_strtolower(implode(' ', $labels))))) { return true; }
+        // Mențiunile din text: doar la început / sfârșit, unde le pun redacțiile. („comunicat
+        // de presă" NU e semn: știrile reale citează des comunicatele Poliției, ministerelor.)
+        $edges = remove_accents(mb_strtolower(mb_substr($text, 0, 300) . ' ' . mb_substr($text, -400)));
+        return (bool) preg_match('#(articol|material|continut)\s+(sustinut|sponsorizat|platit|realizat\s+in\s+parteneriat)|\badvertorial\b#', $edges);
     }
 
     /**
@@ -512,6 +540,7 @@ class HZ_News {
      * slug-ul titlului), cu câteva sinonime pentru cum își numește digi24 rubricile.
      */
     private function url_excluded($path) {
+        if (preg_match('#advertorial|sponsorizat|publireportaj#i', (string) $path)) { return true; }
         $topics = self::excluded_topics();
         if (!$topics) { return false; }
         $syn = array(
@@ -543,9 +572,11 @@ class HZ_News {
     private function classify($art, $with_cats = true) {
         $cats   = $with_cats ? self::site_categories() : array();
         $topics = self::excluded_topics();
-        if (!$cats && !$topics) { return 'OK'; }
         $model  = self::effective_model();
         $prompt = "Știre:\nTITLU: " . $art['title'] . "\nÎNCEPUT: " . mb_substr($art['text'], 0, 700);
+        // v3.53.1: se preiau DOAR știri. Advertorialele și textele promoționale se sar.
+        $prompt .= "\n\nDacă textul NU e o știre (advertorial, articol plătit sau sponsorizat, comunicat de presă al unei firme, "
+                 . "prezentare de produs / serviciu / aplicație, ghid sau sfaturi de cumpărare cu scop comercial), răspunde NICIUNA.";
         if ($topics) {
             $prompt .= "\n\nTEME EXCLUSE: " . implode(', ', $topics) . ". Dacă știrea e în principal despre una dintre ele, răspunde NICIUNA.";
         }
@@ -553,7 +584,7 @@ class HZ_News {
             ? "\n\nCategoriile site-ului: " . implode(' | ', $cats)
               . "\n\nÎn ce categorie a site-ului se potrivește CLAR această știre? Răspunde DOAR cu numele categoriei, scris exact ca în listă, "
               . "sau cu NICIUNA dacă știrea nu ține de niciuna (nu forța o potrivire cu o categorie generală)."
-            : "\n\nRăspunde DOAR cu OK dacă știrea NU e despre temele excluse, altfel NICIUNA.";
+            : "\n\nRăspunde DOAR cu OK dacă e o știre care NU e despre temele excluse, altfel NICIUNA.";
         $system   = 'Ești editor și clasifici știri pe rubricile unui site. Răspunzi cu un singur cuvânt / nume de categorie, fără alt text.';
         $override = function () use ($system) { return $system; };
         add_filter('cw_system_prompt', $override);
