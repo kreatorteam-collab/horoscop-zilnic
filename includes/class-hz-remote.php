@@ -484,15 +484,19 @@ class HZ_Remote {
             update_option('hzn_enabled', (int) !!$set['news_enabled'], 'no');
             $changed[] = 'news_enabled';
         }
-        if (isset($set['news_per_cat']) && $set['news_per_cat'] !== '') {
-            update_option('hzn_per_cat', max(1, min(50, (int) $set['news_per_cat'])), 'no');
-            $changed[] = 'news_per_cat';
-        }
-        // v3.53.3: plafon propriu pe secțiune (ex. news_per_externe = 15); 0 = valoarea globală.
+        // v3.53.3: plafonul e PE SECȚIUNE (news_per_externe = 15 etc.). `news_per_cat`
+        // rămâne pentru compatibilitate și pune aceeași valoare pe toate secțiunile.
         if (class_exists('HZ_News')) {
-            foreach (array_keys(HZ_News::sections()) as $key) {
+            $keys = array_keys(HZ_News::sections());
+            if (isset($set['news_per_cat']) && $set['news_per_cat'] !== '') {
+                $n = max(1, min(50, (int) $set['news_per_cat']));
+                update_option('hzn_per_cat', $n, 'no');
+                foreach ($keys as $key) { update_option('hzn_per_' . $key, $n, 'no'); }
+                $changed[] = 'news_per_cat';
+            }
+            foreach ($keys as $key) {
                 if (isset($set['news_per_' . $key]) && $set['news_per_' . $key] !== '') {
-                    update_option('hzn_per_' . $key, max(0, min(50, (int) $set['news_per_' . $key])), 'no');
+                    update_option('hzn_per_' . $key, max(1, min(50, (int) $set['news_per_' . $key])), 'no');
                     $changed[] = 'news_per_' . $key;
                 }
             }
