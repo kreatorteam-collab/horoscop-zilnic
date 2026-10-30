@@ -94,8 +94,20 @@ class HZ_News {
         foreach (array_keys(self::sections()) as $key) {
             $d['hzn_on_' . $key]  = 1;
             $d['hzn_cat_' . $key] = 0; // 0 = categoria cu numele secțiunii (creată la nevoie)
+            $d['hzn_per_' . $key] = 0; // 0 = valoarea globală `hzn_per_cat`
         }
         return $d;
+    }
+
+    /**
+     * Câte știri pe zi are de dat secțiunea (v3.53.3): setarea ei proprie, iar dacă e
+     * goală (0), valoarea globală „Știri pe zi, pe secțiune". Externe are de 5-10 ori mai
+     * multe știri decât celelalte rubrici, deci plafonul unic o ținea pe loc.
+     */
+    public static function per_day($section) {
+        $own = (int) get_option('hzn_per_' . $section, 0);
+        if ($own > 0) { return max(1, min(50, $own)); }
+        return max(1, min(50, (int) get_option('hzn_per_cat', 5)));
     }
 
     public function init() {
@@ -155,7 +167,6 @@ class HZ_News {
      * deci prima știre a fiecărei secțiuni iese imediat după ora de start.
      */
     private function due_section() {
-        $per   = max(1, min(30, (int) get_option('hzn_per_cat', 5)));
         $start = max(0, min(23, (int) get_option('hzn_start_hour', 7)));
         $end   = max($start + 1, min(24, (int) get_option('hzn_end_hour', 22)));
 
@@ -163,15 +174,17 @@ class HZ_News {
         $hour = (int) $now->format('G') + ((int) $now->format('i')) / 60;
         if ($hour < $start || $hour >= $end) { return ''; }
 
-        $target = (int) min($per, floor($per * ($hour - $start) / ($end - $start)) + 1);
-        $done   = $this->today_counts();
+        $done = $this->today_counts();
 
         $best = '';
         $gap  = 0;
         foreach (array_keys(self::sections()) as $key) {
             if (!(int) get_option('hzn_on_' . $key, 1)) { continue; }
             if (get_transient('hzn_empty_' . $key)) { continue; } // n-a avut știri noi de curând
-            $miss = $target - (isset($done[$key]) ? (int) $done[$key] : 0);
+            // v3.53.3: ținta de acum e pe secțiune (Externe poate avea 15/zi, Politică 3/zi).
+            $per    = self::per_day($key);
+            $target = (int) min($per, floor($per * ($hour - $start) / ($end - $start)) + 1);
+            $miss   = $target - (isset($done[$key]) ? (int) $done[$key] : 0);
             if ($miss > $gap) { $gap = $miss; $best = $key; }
         }
         return $best;
@@ -1062,6 +1075,7 @@ TXT;
         foreach (array_keys(self::sections()) as $key) {
             $opts['hzn_on_' . $key]  = 'absint';
             $opts['hzn_cat_' . $key] = 'absint';
+            $opts['hzn_per_' . $key] = 'absint';
         }
         foreach ($opts as $name => $cb) {
             register_setting('hzn_settings', $name, array('sanitize_callback' => $cb));
@@ -1098,7 +1112,7 @@ TXT;
                 <?php if ($on && $next) { echo esc_html(sprintf(__('Următoarea verificare: %s.', 'horoscop-zilnic'), wp_date('d.m.Y H:i', $next))) . ' '; } ?>
                 <?php
                 $parts = array();
-                foreach (self::sections() as $key => $s) { $parts[] = $s['label'] . ': ' . (isset($done[$key]) ? (int) $done[$key] : 0); }
+                foreach (self::sections() as $key => $s) { $parts[] = $s['label'] . ': ' . (isset($done[$key]) ? (int) $done[$key] : 0) . '/' . self::per_day($key); }
                 echo esc_html(__('Azi: ', 'horoscop-zilnic') . implode(', ', $parts) . '.');
                 ?>
                 <?php if ($last !== '') : ?><span style="display:block;"><?php echo esc_html(sprintf(__('Ultima știre: %s', 'horoscop-zilnic'), $last)); ?></span><?php endif; ?>
@@ -1120,7 +1134,10 @@ TXT;
                     </tr>
                     <tr>
                         <th scope="row"><label for="hzn_per_cat"><?php esc_html_e('Știri pe zi, pe secțiune', 'horoscop-zilnic'); ?></label></th>
-                        <td><input type="number" min="1" max="30" name="hzn_per_cat" id="hzn_per_cat" value="<?php echo esc_attr((int) get_option('hzn_per_cat', 5)); ?>" class="small-text" /></td>
+                        <td>
+                            <input type="number" min="1" max="50" name="hzn_per_cat" id="hzn_per_cat" value="<?php echo esc_attr((int) get_option('hzn_per_cat', 5)); ?>" class="small-text" />
+                            <p class="description"><?php esc_html_e('Valoarea implicită. Mai jos poți pune un număr diferit pentru fiecare secțiune (gol = această valoare).', 'horoscop-zilnic'); ?></p>
+                        </td>
                     </tr>
                     <tr>
                         <th scope="row"><?php esc_html_e('Interval orar', 'horoscop-zilnic'); ?></th>
@@ -1146,8 +1163,14 @@ TXT;
                                         'show_option_none' => __('— automat: AI alege din categoriile site-ului —', 'horoscop-zilnic'),
                                         'option_none_value' => 0,
                                     )); ?>
+                                    <?php $own = (int) get_option('hzn_per_' . $key, 0); ?>
+                                    <label style="margin-left:8px;white-space:nowrap;">
+                                        <input type="number" min="0" max="50" name="hzn_per_<?php echo esc_attr($key); ?>" value="<?php echo esc_attr($own > 0 ? $own : ''); ?>" class="small-text" placeholder="<?php echo esc_attr((int) get_option('hzn_per_cat', 5)); ?>" />
+                                        <?php esc_html_e('pe zi', 'horoscop-zilnic'); ?>
+                                    </label>
                                 </p>
                             <?php endforeach; ?>
+                            <p class="description"><?php esc_html_e('Numărul de știri pe zi se poate seta separat pe fiecare secțiune (ex. Externe 15, Politică 3). Gol = valoarea implicită de mai sus.', 'horoscop-zilnic'); ?></p>
                         </td>
                     </tr>
                     <tr>

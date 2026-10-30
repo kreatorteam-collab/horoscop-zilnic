@@ -209,6 +209,7 @@ class HZ_Remote {
             // v3.50.0: modulul Știri (digi24 rescris).
             'news_on'         => (int) get_option('hzn_enabled', 0),
             'news_per_cat'    => (int) get_option('hzn_per_cat', 5),
+            'news_per_section'=> class_exists('HZ_News') ? array_combine(array_keys(HZ_News::sections()), array_map(array('HZ_News', 'per_day'), array_keys(HZ_News::sections()))) : array(),
             'news_model'      => (string) get_option('hzn_model', ''),
             'news_last'       => (string) get_option('hzn_last_run', ''),
             'news_error'      => (string) get_option('hzn_last_error', ''),
@@ -484,8 +485,17 @@ class HZ_Remote {
             $changed[] = 'news_enabled';
         }
         if (isset($set['news_per_cat']) && $set['news_per_cat'] !== '') {
-            update_option('hzn_per_cat', max(1, min(30, (int) $set['news_per_cat'])), 'no');
+            update_option('hzn_per_cat', max(1, min(50, (int) $set['news_per_cat'])), 'no');
             $changed[] = 'news_per_cat';
+        }
+        // v3.53.3: plafon propriu pe secțiune (ex. news_per_externe = 15); 0 = valoarea globală.
+        if (class_exists('HZ_News')) {
+            foreach (array_keys(HZ_News::sections()) as $key) {
+                if (isset($set['news_per_' . $key]) && $set['news_per_' . $key] !== '') {
+                    update_option('hzn_per_' . $key, max(0, min(50, (int) $set['news_per_' . $key])), 'no');
+                    $changed[] = 'news_per_' . $key;
+                }
+            }
         }
         if (isset($set['news_model']) && trim((string) $set['news_model']) !== '') {
             $nm = sanitize_text_field((string) $set['news_model']);
