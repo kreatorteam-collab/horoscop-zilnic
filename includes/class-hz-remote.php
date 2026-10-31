@@ -32,7 +32,7 @@ class HZ_Remote {
     }
 
     public function register() {
-        $routes = array('info', 'enqueue', 'status', 'control', 'settings', 'rewrite', 'golinks', 'trash', 'costs', 'reimage', 'upgrade');
+        $routes = array('info', 'enqueue', 'status', 'control', 'settings', 'rewrite', 'golinks', 'trash', 'costs', 'reimage', 'upgrade', 'category');
         foreach ($routes as $route) {
             register_rest_route('hz/v1', '/' . $route, array(
                 'methods'             => 'POST',
@@ -562,6 +562,51 @@ class HZ_Remote {
                 'magnific_hash'  => HZ_Magnific::key_hash(),
                 'magnific_limit' => HZ_Magnific::daily_limit(),
                 'people_ethnicity' => HZ_Magnific::ethnicity(),
+            ),
+        );
+    }
+
+    /**
+     * v3.54.0: redenumește o categorie de pe site (panoul central, pasul cu
+     * categoriile din AI Writer flotă). Doar NUMELE se schimbă implicit: slug-ul
+     * (deci adresa arhivei categoriei, indexată deja în Google) rămâne neatins,
+     * în afară de cazul în care panoul trimite explicit `slug`.
+     * Body: { id, name, slug? }  ->  { ok, category: {id,name,slug,count} }
+     */
+    public function handle_category(WP_REST_Request $req) {
+        $data = $this->auth($req);
+        if ($data instanceof WP_REST_Response) { return $data; }
+
+        $id   = isset($data['id']) ? (int) $data['id'] : 0;
+        $name = isset($data['name']) ? trim(wp_strip_all_tags((string) $data['name'])) : '';
+        $term = $id > 0 ? get_term($id, 'category') : null;
+        if (!($term instanceof WP_Term)) {
+            return new WP_REST_Response(array('error' => 'no_category', 'message' => 'Categoria nu există pe site.'), 404);
+        }
+        if ($name === '' || mb_strlen($name) > 190) {
+            return new WP_REST_Response(array('error' => 'bad_name', 'message' => 'Numele nou e gol sau prea lung.'), 400);
+        }
+
+        $args = array('name' => $name);
+        $slug = isset($data['slug']) ? sanitize_title((string) $data['slug']) : '';
+        if ($slug !== '') { $args['slug'] = $slug; }
+
+        $res = wp_update_term($id, 'category', $args);
+        if (is_wp_error($res)) {
+            return new WP_REST_Response(array('error' => $res->get_error_code(),
+                'message' => $res->get_error_message()), 409);
+        }
+        clean_term_cache($id, 'category');
+        $t = get_term($id, 'category');
+
+        return array(
+            'ok'       => true,
+            'old_name' => $term->name,
+            'category' => array(
+                'id'    => (int) $t->term_id,
+                'name'  => $t->name,
+                'slug'  => $t->slug,
+                'count' => (int) $t->count,
             ),
         );
     }
