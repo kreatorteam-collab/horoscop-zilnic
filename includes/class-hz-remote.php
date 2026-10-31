@@ -32,7 +32,7 @@ class HZ_Remote {
     }
 
     public function register() {
-        $routes = array('info', 'enqueue', 'status', 'control', 'settings', 'rewrite', 'golinks', 'trash', 'costs', 'reimage', 'upgrade', 'category');
+        $routes = array('info', 'enqueue', 'status', 'control', 'settings', 'rewrite', 'golinks', 'trash', 'costs', 'reimage', 'upgrade', 'category', 'media');
         foreach ($routes as $route) {
             register_rest_route('hz/v1', '/' . $route, array(
                 'methods'             => 'POST',
@@ -275,6 +275,9 @@ class HZ_Remote {
                 // v3.16.0 — produsele articolului editorial (mode=review). Curățarea o
                 // face HZ_Review::sanitize_products, în add_items.
                 'products' => isset($it['products']) ? $it['products'] : array(),
+                // v3.55.0: token-ul pozei încărcate înainte prin hz/v1/media.
+                'imgfile'  => isset($it['img_file']) && class_exists('HZ_Uploads') && HZ_Uploads::valid_token($it['img_file'])
+                    ? (string) $it['img_file'] : '',
             );
         }
 
@@ -567,6 +570,25 @@ class HZ_Remote {
     }
 
     /**
+     * v3.55.0: primește o poză încărcată din panou (sursa „Încărcate de mine"), câte
+     * una pe cerere. Stă în uploads/hz-pending până se publică articolul care o
+     * folosește (vezi HZ_Uploads). Body: { data: base64 } -> { ok, token }
+     */
+    public function handle_media(WP_REST_Request $req) {
+        $data = $this->auth($req);
+        if ($data instanceof WP_REST_Response) { return $data; }
+        if (!class_exists('HZ_Uploads')) {
+            return new WP_REST_Response(array('error' => 'no_module'), 400);
+        }
+        $token = HZ_Uploads::store(isset($data['data']) ? (string) $data['data'] : '');
+        if (is_wp_error($token)) {
+            return new WP_REST_Response(array('error' => $token->get_error_code(),
+                'message' => $token->get_error_message()), 400);
+        }
+        return array('ok' => true, 'token' => $token);
+    }
+
+    /**
      * v3.54.0: redenumește o categorie de pe site (panoul central, pasul cu
      * categoriile din AI Writer flotă). Doar NUMELE se schimbă implicit: slug-ul
      * (deci adresa arhivei categoriei, indexată deja în Google) rămâne neatins,
@@ -770,7 +792,7 @@ class HZ_Remote {
         if ($data instanceof WP_REST_Response) { return $data; }
 
         $action = isset($data['action']) ? sanitize_key((string) $data['action']) : '';
-        if (!in_array($action, array('start', 'stop', 'retry', 'clear', 'unlock', 'cancel', 'pause_batch', 'resume_batch'), true)) {
+        if (!in_array($action, array('start', 'stop', 'retry', 'clear', 'unlock', 'cancel', 'cancel_keep', 'pause_batch', 'resume_batch'), true)) {
             return new WP_REST_Response(array('error' => 'bad_action'), 400);
         }
         // Cu `batch` trimis, „retry" reia DOAR articolele cu eroare din lotul acela

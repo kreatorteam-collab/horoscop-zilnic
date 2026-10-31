@@ -274,6 +274,7 @@ class HZ_Bulk {
             $key = $this->norm_title($title);
             if (isset($known[$key]) || $this->post_title_exists($title)) {
                 $skipped++;
+                if (!empty($row['imgfile']) && class_exists('HZ_Uploads')) { HZ_Uploads::delete($row['imgfile']); }
                 continue;
             }
             $known[$key] = 1;
@@ -330,6 +331,8 @@ class HZ_Bulk {
                 'img'     => $img,
                 'imgsrc'  => $imgsrc,
                 'imgstyle'=> $imgstyle,
+                // v3.55.0: poza încărcată din panou (HZ_Uploads), folosită ca cover.
+                'imgf'    => (isset($row['imgfile']) && class_exists('HZ_Uploads') && HZ_Uploads::exists($row['imgfile'])) ? (string) $row['imgfile'] : '',
                 'web'     => $web,
                 'rd'      => $rd,
                 'lnk'     => array('total' => count($links), 'done' => 0, 'forced' => 0),
@@ -483,7 +486,8 @@ class HZ_Bulk {
             case 'clear':
                 $q = array();
                 foreach ($this->queue() as $item) {
-                    if ($item['s'] === 'working') { $q[] = $item; }
+                    if ($item['s'] === 'working') { $q[] = $item; continue; }
+                    if (class_exists('HZ_Uploads')) { HZ_Uploads::delete_for_items(array($item)); }
                 }
                 $this->save_queue($q);
                 delete_option('hzb_paused_reason');
@@ -510,7 +514,10 @@ class HZ_Bulk {
             // Anularea UNUI lot (butonul „Șterge" din panoul central): scoate din coadă
             // doar articolele lotului care nu sunt în lucru. Spre deosebire de „clear",
             // nu atinge loturile celorlalte comenzi care împart același site.
+            // v3.55.0: `cancel_keep` = anulare la „Refă" din panou: pozele încărcate
+            // rămân pe disc, pentru că lotul nou (cu aceleași titluri) le folosește.
             case 'cancel':
+            case 'cancel_keep':
                 if ($batch === '') { return 'Lipsește lotul.'; }
                 $q = array();
                 $n = 0;
@@ -519,6 +526,7 @@ class HZ_Bulk {
                     $inBatch = isset($item['b']) && $item['b'] === $batch;
                     if (!$inBatch) { $q[] = $item; continue; }
                     if ($item['s'] === 'working') { $q[] = $item; $working++; continue; }
+                    if ($action === 'cancel' && class_exists('HZ_Uploads')) { HZ_Uploads::delete_for_items(array($item)); }
                     $n++;
                 }
                 $this->save_queue($q);
@@ -778,6 +786,8 @@ class HZ_Bulk {
         update_option('hzb_lock_at', time(), 'no'); // v3.8.3: momentul lock-ului, pt auto-vindecare
         if (function_exists('set_time_limit')) { @set_time_limit(600); }
 
+        if (class_exists('HZ_Uploads')) { HZ_Uploads::cleanup_old(); }
+
         $q    = $this->queue();
         $cand = array();
         $held = self::paused_batches();
@@ -830,7 +840,7 @@ class HZ_Bulk {
         $idx   = null;
         $block = null;
         foreach ($cand as $i) {
-            if ($this->images_for($q[$i]) < 1) { $idx = $i; break; }
+            if ($this->images_for($q[$i]) < 1 || $this->has_upload($q[$i])) { $idx = $i; break; }
             $b = self::images_blocked((string) ($q[$i]['imgsrc'] ?? ''));
             if ($b === null) { $idx = $i; break; }
             // Reținem blocajul care se rezolvă cel mai devreme (0 = nu se rezolvă singur).
@@ -1111,7 +1121,18 @@ class HZ_Bulk {
         // 2) Imaginile: interogare de căutare în engleză (stocul e indexat în
         // engleză), generată de model din titlu — apel minuscul, cost neglijabil.
         $images   = $this->images_for($item);
-        $img      = $this->fetch_images($title, $model, $images, (string) ($item['imgsrc'] ?? ''), (string) ($item['imgstyle'] ?? ''));
+        $img      = null;
+        // v3.55.0: poza încărcată din panou devine coverul; dacă n-a mers (fișier
+        // dispărut), cădem pe sursa obișnuită a lotului/site-ului.
+        if ($this->has_upload($item)) {
+            $att = HZ_Uploads::attach($item['imgf'], 0, $title);
+            if (!is_wp_error($att)) {
+                $img = array('ids' => array($att), 'note' => '[poză: încărcată]', 'cost' => 0.0, 'blocked' => false);
+            }
+        }
+        if ($img === null) {
+            $img = $this->fetch_images($title, $model, $images, (string) ($item['imgsrc'] ?? ''), (string) ($item['imgstyle'] ?? ''));
+        }
         $att_ids  = $img['ids'];
         $img_note = $img['note'];
         $cost    += $img['cost'];
@@ -1297,6 +1318,11 @@ class HZ_Bulk {
      * override-ul lotului trimis de panou. (Ca să revii: scoate MAX_IMAGES.)
      */
     const MAX_IMAGES = 1;
+
+    /** v3.55.0: itemul are o poză încărcată din panou, încă pe disc. */
+    private function has_upload($item) {
+        return !empty($item['imgf']) && class_exists('HZ_Uploads') && HZ_Uploads::exists($item['imgf']);
+    }
 
     private function images_for($item) {
         if (isset($item['img']) && $item['img'] !== null && $item['img'] !== '') {
