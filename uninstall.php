@@ -40,6 +40,7 @@ $options = array(
 foreach ($options as $opt) { delete_option($opt); }
 delete_transient('cw_update_info');
 delete_transient('hz_update_info');
+delete_transient('hz_uploads_cleanup');
 delete_transient('hz_horo_lock');
 delete_transient('hz_weather_lock');
 delete_transient('hz_weather_anm_xml');
