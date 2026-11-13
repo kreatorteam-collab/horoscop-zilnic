@@ -164,6 +164,9 @@ class HZ_ImageGen {
         if ($style !== '') { $p .= ' Style: ' . $style . '.'; }
         $people = self::people_rule();
         if ($people !== '') { $p .= ' ' . $people; }
+        // v3.56.0: poza se decupează la 16:9 pentru Google Discover (HZ_Discover) - cerem
+        // subiectul pe centru, ca decupajul de sus-jos să nu-l taie.
+        if (HZ_Discover::enabled()) { $p .= ' Wide landscape framing with the main subject centered and some space above and below it.'; }
         return $p . ' Natural lighting, candid documentary style, shot on 50mm, shallow depth '
                   . 'of field, high detail, no text, no watermark, no logos, no collage.';
     }
@@ -265,8 +268,10 @@ class HZ_ImageGen {
             return new WP_Error('hzig_tmp', 'Generare imagine: nu am putut scrie fișierul temporar.');
         }
         $file   = self::convert($tmp, $title);
-        $att_id = media_handle_sideload(array('name' => $file['name'], 'tmp_name' => $file['path']), $post_id, $title);
-        if (is_wp_error($att_id)) { @unlink($file['path']); return $att_id; }
+        // v3.56.0: Google Discover - 16:9, minimum 1200 px lățime (HZ_Discover).
+        $side   = HZ_Discover::fit_sideload(array('name' => $file['name'], 'tmp_name' => $file['path']));
+        $att_id = media_handle_sideload($side, $post_id, $title);
+        if (is_wp_error($att_id)) { @unlink($side['tmp_name']); return $att_id; }
 
         // Alt GOL, ca la pozele de stock (imagine decorativa) — coerent cu regula existenta.
         update_post_meta($att_id, '_wp_attachment_image_alt', '');

@@ -433,7 +433,7 @@ class HZ_Remote {
                 $skipped[] = 'people_ethnicity necunoscut: ' . $eth;
             }
         }
-        foreach (array('imagegen_model' => 'hz_imagegen_model', 'imagegen_size' => 'hz_imagegen_size', 'imagegen_quality' => 'hz_imagegen_quality', 'imagegen_style' => 'hz_imagegen_style', 'imagegen_format' => 'hz_imagegen_format', 'imagegen_compression' => 'hz_imagegen_compression', 'img_subsizes_webp' => 'hz_img_subsizes_webp', 'img_webp_quality' => 'hz_img_webp_quality') as $f => $opt) {
+        foreach (array('imagegen_model' => 'hz_imagegen_model', 'imagegen_size' => 'hz_imagegen_size', 'imagegen_quality' => 'hz_imagegen_quality', 'imagegen_style' => 'hz_imagegen_style', 'imagegen_format' => 'hz_imagegen_format', 'imagegen_compression' => 'hz_imagegen_compression', 'img_subsizes_webp' => 'hz_img_subsizes_webp', 'img_webp_quality' => 'hz_img_webp_quality', 'discover_images' => 'hz_discover_images') as $f => $opt) {
             if (isset($set[$f]) && trim((string) $set[$f]) !== '') {
                 update_option($opt, sanitize_text_field((string) $set[$f]), 'no');
                 $changed[] = $f;

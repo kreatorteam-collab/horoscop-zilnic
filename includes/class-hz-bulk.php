@@ -241,7 +241,8 @@ class HZ_Bulk {
         $status = isset($opts['status']) ? (string) $opts['status'] : 'draft';
         if (!in_array($status, array('publish', 'draft', 'pending'), true)) { $status = 'draft'; }
         $model  = isset($opts['model']) ? (string) $opts['model'] : '';
-        $extra  = mb_substr(isset($opts['extra']) ? (string) $opts['extra'] : '', 0, 2000);
+        // v3.56.0: 6000 (era 2000) - aplicația trimite și ghidul editorial Google Discover (~1900 caractere).
+        $extra  = mb_substr(isset($opts['extra']) ? (string) $opts['extra'] : '', 0, 6000);
         $batch  = isset($opts['batch']) ? substr(preg_replace('/[^a-zA-Z0-9_\-]/', '', (string) $opts['batch']), 0, 40) : '';
         $len    = isset($opts['length']) ? (int) $opts['length'] : 0;
         $img    = isset($opts['images']) && $opts['images'] !== '' ? max(0, min(self::MAX_IMAGES, (int) $opts['images'])) : null;
