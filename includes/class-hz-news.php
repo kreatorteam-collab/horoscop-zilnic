@@ -990,7 +990,10 @@ TXT;
         if (!isset($exts[$mime])) { @unlink($tmp); return new WP_Error('hzn_img_type', 'fișierul descărcat nu e o imagine (' . ($mime !== '' ? $mime : 'necunoscut') . ')'); }
         $ext  = $exts[$mime];
         $name = sanitize_file_name(sanitize_title($alt) . '-' . substr(md5($url), 0, 6) . '.' . $ext);
-        $id   = media_handle_sideload(array('name' => $name, 'tmp_name' => $tmp), $post_id, $alt);
+        // v3.56.0: Google Discover - 16:9, minimum 1200 px lățime (HZ_Discover).
+        $file = HZ_Discover::fit_sideload(array('name' => $name, 'tmp_name' => $tmp));
+        $tmp  = $file['tmp_name'];
+        $id   = media_handle_sideload($file, $post_id, $alt);
         if (is_wp_error($id)) { @unlink($tmp); return $id; }
         update_post_meta($id, '_wp_attachment_image_alt', $alt);
         wp_update_post(array('ID' => $id, 'post_excerpt' => $credit)); // legenda = creditul

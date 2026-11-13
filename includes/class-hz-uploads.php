@@ -99,11 +99,14 @@ class HZ_Uploads {
         if ($name === '') { $name = 'poza'; }
         // media_handle_sideload MUTĂ fișierul (rename) în folderul lunii -> hz-pending
         // rămâne gol, fără copie.
-        $att = media_handle_sideload(array('name' => $name . '.' . $ext, 'tmp_name' => $p), (int) $post_id, $title);
+        // v3.56.0: Google Discover - 16:9, minimum 1200 px (aplicația trimite deja așa; plasă de siguranță).
+        $file = HZ_Discover::fit_sideload(array('name' => $name . '.' . $ext, 'tmp_name' => $p));
+        $att  = media_handle_sideload($file, (int) $post_id, $title);
         if (is_wp_error($att)) {
             return $att; // fișierul rămâne, se reîncearcă la rularea următoare
         }
         if (is_file($p)) { @unlink($p); }
+        if (is_file($file['tmp_name'])) { @unlink($file['tmp_name']); }
         return (int) $att;
     }
 

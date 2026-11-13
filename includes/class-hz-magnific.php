@@ -681,7 +681,10 @@ class HZ_Magnific {
 
         // $title ajunge doar in titlul atasamentului (ca sa se recunoasca in biblioteca
         // media), NU in alt: pozele de stock sunt decorative, nu descriu continutul.
-        $att_id = media_handle_sideload(array('name' => $filename, 'tmp_name' => $tmp), $post_id, $title);
+        // v3.56.0: Google Discover - 16:9, minimum 1200 px lățime (HZ_Discover).
+        $file   = HZ_Discover::fit_sideload(array('name' => $filename, 'tmp_name' => $tmp));
+        $tmp    = $file['tmp_name'];
+        $att_id = media_handle_sideload($file, $post_id, $title);
         if (is_wp_error($att_id)) {
             @unlink($tmp);
             return $att_id;
