@@ -247,13 +247,6 @@ add_action('init', function () {
     // din HZ_News::default_hosts() (comunicateinpresa.ro, revistabravo.ro).
     HZ_News::seed();
 
-    // v3.57.1: poza originală a sursei nu se mai folosește la știri (aducea și sigla
-    // publicației). Unde era pornită, trece pe colajul AI, ca știrile să nu rămână fără poză.
-    if ((int) get_option('hzn_source_photo', 0)) {
-        update_option('hzn_source_photo', 0);
-        update_option('hzn_images', 1);
-    }
-
     update_option('hz_db_version', HZ_VERSION, 'no');
 });
 
