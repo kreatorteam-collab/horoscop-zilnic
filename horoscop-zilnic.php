@@ -3,7 +3,7 @@
  * Plugin Name: AI Writer & Conținut Zilnic
  * Plugin URI: https://targetseo.ro/
  * Description: Generează și rescrie articole SEO direct în editor (GPT-5.6 și Claude), creează articole în bulk cu imagini de stock relevante (Magnific) și publică automat conținut zilnic: horoscopul cu toate cele 12 zodii și vremea pe regiuni (date oficiale ANM). Un singur plugin: chei API, costuri, editor, bulk, horoscop și vreme.
- * Version: 3.57.0
+ * Version: 3.57.1
  * Author: Eduard / TargetSEO
  * Text Domain: horoscop-zilnic
  * Requires at least: 5.6
@@ -15,7 +15,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('HZ_VERSION', '3.57.0');
+define('HZ_VERSION', '3.57.1');
 define('HZ_PATH', plugin_dir_path(__FILE__));
 define('HZ_URL', plugin_dir_url(__FILE__));
 
@@ -49,7 +49,7 @@ function hz_init() {
     (new HZ_Weather())->init();
     (new HZ_Bulk())->init();
     (new HZ_News())->init();     // v3.50.0: știri preluate și rescrise (digi24)
-    (new HZ_Syndicate())->init(); // v3.57.0: preluare articole între site-urile din flotă
+    (new HZ_Syndicate())->init(); // v3.57.1: preluare articole între site-urile din flotă
     (new HZ_Remote())->init();   // v3.5.0: comenzi din panoul central (HMAC)
     (new HZ_GoLinks())->init(); // v3.16.0: redirector /go/{slug} pentru linkuri de afiliere
     (new HZ_Updater())->init();
@@ -246,6 +246,21 @@ add_action('init', function () {
     // v3.50.0: modulul „Știri" — opțiunile hzn_*, pornit singur doar pe site-urile
     // din HZ_News::default_hosts() (comunicateinpresa.ro, revistabravo.ro).
     HZ_News::seed();
+
+    // v3.57.1: știrile din ultimele 60 de zile care au drept cover poza sursei se verifică o
+    // dată: unde „poza" e de fapt sigla publicației, HZ_News::fix_generic_covers() o înlocuiește.
+    if (!get_option('hzn_logo_listed')) {
+        global $wpdb;
+        $ids = $wpdb->get_col(
+            "SELECT pm.post_id FROM {$wpdb->postmeta} pm JOIN {$wpdb->posts} p ON p.ID = pm.post_id
+             WHERE pm.meta_key = '_hzn_image' AND pm.meta_value LIKE 'sursa%'
+               AND p.post_status IN ('publish','draft','pending','future')
+               AND p.post_date > DATE_SUB(NOW(), INTERVAL 60 DAY)
+             ORDER BY p.ID DESC LIMIT 2000"
+        );
+        if (!empty($ids)) { update_option('hzn_logo_check', array_fill_keys(array_map('intval', $ids), 0), 'no'); }
+        update_option('hzn_logo_listed', 1, 'no');
+    }
 
     update_option('hz_db_version', HZ_VERSION, 'no');
 });
