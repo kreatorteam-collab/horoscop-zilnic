@@ -8,7 +8,8 @@ if (!defined('ABSPATH')) { exit; }
  * site-ului țintă (hz/v1/import), ambele semnate HMAC ca restul rutelor hz/v1.
  *
  * Reguli fixe, indiferent ce cere panoul:
- *  - sursa nu dă mai departe articole preluate la rândul lor (fără lanțuri / bucle),
+ *  - sursa nu dă mai departe articole preluate la rândul lor de pe alt site din flotă
+ *    (fără lanțuri / bucle; știrile rescrise de modulul „Știri" SE dau, v3.57.1),
  *    advertoriale, articole cu linkuri rel="sponsored" sau cu „(P)" în titlu;
  *  - ținta trece conținutul prin wp_kses_post, nu creează același articol de două
  *    ori (după adresa sursei, apoi după titlu) și descarcă poza doar de pe domeniul
@@ -112,7 +113,6 @@ class HZ_Syndicate {
     /** Motivul pentru care articolul nu pleacă mai departe ('' = pleacă). */
     public static function skip_reason(WP_Post $p, array $terms) {
         if (get_post_meta($p->ID, self::META_SRC, true)) { return 'preluat la rândul lui'; }
-        if (get_post_meta($p->ID, '_hzn_source', true)) { return 'știre preluată din altă sursă'; }
         if (post_password_required($p) || $p->post_password !== '') { return 'protejat cu parolă'; }
         if (preg_match('/\(\s*P\s*\)/u', $p->post_title)) { return 'advertorial (P)'; }
         foreach ($terms as $t) {
