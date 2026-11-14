@@ -21,6 +21,8 @@ if (!defined('ABSPATH')) { exit; }
  *   hz/v1/reimage  -> reface pozele articolelor deja publicate dintr-un lot (alt stil/sursa)
  *   hz/v1/upgrade  -> v3.53.0: actualizeaza pluginul ACUM din repo-ul GitHub (nu mai
  *                     astepti auto-update-ul WP, care verifica doar de 2 ori pe zi)
+ *   hz/v1/export   -> v3.57.0: articolele noi ale site-ului, pentru „Preluare articole"
+ *   hz/v1/import   -> v3.57.0: creează pe site un articol preluat de pe alt site din flotă
  */
 class HZ_Remote {
 
@@ -32,7 +34,7 @@ class HZ_Remote {
     }
 
     public function register() {
-        $routes = array('info', 'enqueue', 'status', 'control', 'settings', 'rewrite', 'golinks', 'trash', 'costs', 'reimage', 'upgrade', 'category', 'media');
+        $routes = array('info', 'enqueue', 'status', 'control', 'settings', 'rewrite', 'golinks', 'trash', 'costs', 'reimage', 'upgrade', 'category', 'media', 'export', 'import');
         foreach ($routes as $route) {
             register_rest_route('hz/v1', '/' . $route, array(
                 'methods'             => 'POST',
@@ -567,6 +569,38 @@ class HZ_Remote {
                 'people_ethnicity' => HZ_Magnific::ethnicity(),
             ),
         );
+    }
+
+    /**
+     * v3.57.0: „Preluare articole" - site-ul ca SURSĂ. { probe: 1 } = categorii, autori;
+     * altfel articolele noi (vezi HZ_Syndicate::export).
+     */
+    public function handle_export(WP_REST_Request $req) {
+        $data = $this->auth($req);
+        if ($data instanceof WP_REST_Response) { return $data; }
+        if (empty($data['ts'])) { return new WP_REST_Response(array('error' => 'stale_request'), 403); }
+        if (!empty($data['probe'])) { return HZ_Syndicate::probe(); }
+        return HZ_Syndicate::export($data);
+    }
+
+    /**
+     * v3.57.0: „Preluare articole" - site-ul ca ȚINTĂ: un articol pe cerere
+     * (vezi HZ_Syndicate::import). { probe: 1 } = categorii, autori.
+     */
+    public function handle_import(WP_REST_Request $req) {
+        $data = $this->auth($req);
+        if ($data instanceof WP_REST_Response) { return $data; }
+        if (empty($data['ts'])) { return new WP_REST_Response(array('error' => 'stale_request'), 403); }
+        if (!empty($data['probe'])) { return HZ_Syndicate::probe(); }
+
+        if (function_exists('set_time_limit')) { @set_time_limit(120); }
+        $res = HZ_Syndicate::import($data);
+        if (is_wp_error($res)) {
+            // 200 cu `error`: panoul vede motivul și NU reîncearcă (articolul e respins, nu site-ul căzut).
+            return array('ok' => false, 'rejected' => 1, 'error' => $res->get_error_code(),
+                'message' => $res->get_error_message());
+        }
+        return $res;
     }
 
     /**
