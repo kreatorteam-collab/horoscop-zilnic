@@ -86,6 +86,7 @@ class HZ_News {
             'hzn_images'     => 1,
             'hzn_free_photos'=> 0,
             'hzn_source_photo'=> 0,
+            'hzn_require_photo' => 1,
             'hzn_nsi_banner' => 1,
             'hzn_exclude'    => 'vreme, sănătate, horoscop, vedete, filme, muzică',
             'hzn_max_age'    => 24,
@@ -262,6 +263,17 @@ class HZ_News {
             if ($this->post_exists($url, $art['title'])) {
                 $this->mark_seen($url, 'exista');
                 continue;
+            }
+
+            // v3.57.2: cu „poza originală" pornită, știrea fără fotografie proprie la sursă
+            // (doar sigla publicației) nu se preia deloc. Verificat ÎNAINTE de apelurile AI.
+            if ((int) get_option('hzn_source_photo', 0) && (int) get_option('hzn_require_photo', 1)) {
+                $why = $this->source_photo_problem($art);
+                if ($why !== '') {
+                    $this->mark_seen($url, 'fara_poza');
+                    update_option('hzn_last_image', current_time('H:i') . ' — știre sărită: ' . $why, 'no');
+                    continue;
+                }
             }
 
             // Clasificarea rulează mereu (v3.53.1): pe lângă categorie și temele excluse,
@@ -1053,11 +1065,12 @@ TXT;
         update_option('hzn_logo_check', $queue, 'no');
     }
 
-    private function sideload($url, $post_id, $alt, $credit, $check_generic = false) {
-        require_once ABSPATH . 'wp-admin/includes/media.php';
+    /**
+     * Descarcă o imagine într-un fișier temporar și verifică faptul că e chiar imagine.
+     * @return array|WP_Error [cale temporară, mime, extensii permise]
+     */
+    private function download_image($url) {
         require_once ABSPATH . 'wp-admin/includes/file.php';
-        require_once ABSPATH . 'wp-admin/includes/image.php';
-
         // v3.51.6: descărcare cu antet de browser + Referer (download_url pleacă cu UA-ul
         // WordPress, pe care unele CDN-uri îl refuză), iar extensia vine din conținutul
         // real: o poză WebP numită .jpg e respinsă de WordPress ca „tip nepermis".
@@ -1073,6 +1086,30 @@ TXT;
         $mime = function_exists('wp_get_image_mime') ? (string) wp_get_image_mime($tmp) : '';
         $exts = array('image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp', 'image/gif' => 'gif', 'image/avif' => 'avif');
         if (!isset($exts[$mime])) { @unlink($tmp); return new WP_Error('hzn_img_type', 'fișierul descărcat nu e o imagine (' . ($mime !== '' ? $mime : 'necunoscut') . ')'); }
+        return array($tmp, $mime, $exts);
+    }
+
+    /**
+     * v3.57.2: știrea are la sursă o fotografie a ei? '' = da; altfel motivul (fără poză,
+     * poza nu se descarcă, sau e sigla / imaginea generică a publicației).
+     */
+    private function source_photo_problem($art) {
+        if (empty($art['image'])) { return 'sursa nu are poză la această știre'; }
+        $dl = $this->download_image($art['image']);
+        if (is_wp_error($dl)) { return $dl->get_error_message(); }
+        $why = self::generic_image_reason($dl[0], $art['image']);
+        @unlink($dl[0]);
+        return $why;
+    }
+
+    private function sideload($url, $post_id, $alt, $credit, $check_generic = false) {
+        require_once ABSPATH . 'wp-admin/includes/media.php';
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+        require_once ABSPATH . 'wp-admin/includes/image.php';
+
+        $dl = $this->download_image($url);
+        if (is_wp_error($dl)) { return $dl; }
+        list($tmp, $mime, $exts) = $dl;
         if ($check_generic) {
             $why = self::generic_image_reason($tmp, $url);
             if ($why !== '') { @unlink($tmp); return new WP_Error('hzn_img_generic', $why); }
@@ -1162,7 +1199,7 @@ TXT;
         $opts = array(
             'hzn_enabled' => 'absint', 'hzn_per_cat' => 'absint', 'hzn_start_hour' => 'absint',
             'hzn_end_hour' => 'absint', 'hzn_status' => 'sanitize_key', 'hzn_model' => 'sanitize_text_field',
-            'hzn_author' => 'absint', 'hzn_images' => 'absint', 'hzn_free_photos' => 'absint', 'hzn_source_photo' => 'absint', 'hzn_nsi_banner' => 'absint', 'hzn_exclude' => 'sanitize_text_field', 'hzn_max_age' => 'absint', 'hzn_rss_url' => 'esc_url_raw',
+            'hzn_author' => 'absint', 'hzn_images' => 'absint', 'hzn_free_photos' => 'absint', 'hzn_source_photo' => 'absint', 'hzn_require_photo' => 'absint', 'hzn_nsi_banner' => 'absint', 'hzn_exclude' => 'sanitize_text_field', 'hzn_max_age' => 'absint', 'hzn_rss_url' => 'esc_url_raw',
         );
         foreach (array_keys(self::sections()) as $key) {
             $opts['hzn_on_' . $key]  = 'absint';
@@ -1309,6 +1346,8 @@ TXT;
                             <label><input type="checkbox" name="hzn_images" value="1" <?php checked(1, (int) get_option('hzn_images', 1)); ?> /> <?php esc_html_e('Colaj AI generat din conținutul știrii (~$0,05)', 'horoscop-zilnic'); ?></label><br />
                             <input type="hidden" name="hzn_source_photo" value="0" />
                             <label><input type="checkbox" name="hzn_source_photo" value="1" <?php checked(1, (int) get_option('hzn_source_photo', 0)); ?> /> <?php esc_html_e('Folosește poza originală a știrii, cu creditul sursei („Foto: …”), pe răspunderea ta: pozele de agenție (Profimedia, Inquam etc.) pot aduce facturi pentru drepturi de autor', 'horoscop-zilnic'); ?></label><br />
+                            <input type="hidden" name="hzn_require_photo" value="0" />
+                            <label style="margin-left:24px"><input type="checkbox" name="hzn_require_photo" value="1" <?php checked(1, (int) get_option('hzn_require_photo', 1)); ?> /> <?php esc_html_e('Dacă știrea nu are poză proprie la sursă (doar sigla publicației), nu o prelua. Debifat: știrea se preia cu un colaj AI', 'horoscop-zilnic'); ?></label><br />
                             <input type="hidden" name="hzn_nsi_banner" value="0" />
                             <label><input type="checkbox" name="hzn_nsi_banner" value="1" <?php checked(1, (int) get_option('hzn_nsi_banner', 1)); ?> <?php disabled(!class_exists('Next_Stage_Image')); ?> /> <?php esc_html_e('Generează și imaginea Social Media cu banner (Next Stage Image), ca butonul „Generează imagine”', 'horoscop-zilnic'); ?><?php if (!class_exists('Next_Stage_Image')) { echo ' — ' . esc_html__('pluginul nu e activ pe site', 'horoscop-zilnic'); } ?></label><br />
                             <input type="hidden" name="hzn_free_photos" value="0" />
