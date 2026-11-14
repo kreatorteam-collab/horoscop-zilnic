@@ -155,6 +155,7 @@ class HZ_News {
     /* ---------------- rulare ---------------- */
 
     public function tick() {
+        $this->fix_generic_covers();
         if (!(int) get_option('hzn_enabled', 0)) { return; }
         $section = $this->due_section();
         if ($section === '') { return; }
@@ -835,7 +836,8 @@ TXT;
         // agenție nu se transferă prin preluare).
         if ((int) get_option('hzn_source_photo', 0) && !empty($art['image'])) {
             $credit = isset($art['image_credit']) ? (string) $art['image_credit'] : '';
-            $id = $this->sideload($art['image'], $post_id, $rw['title'], $credit);
+            // v3.57.1: cu verificare - sigla / imaginea generică a publicației nu e poza știrii.
+            $id = $this->sideload($art['image'], $post_id, $rw['title'], $credit, true);
             if (!is_wp_error($id)) { return array('id' => $id, 'credit' => $credit, 'source' => 'sursa'); }
             $src_err = 'poza sursei: ' . $id->get_error_message();
         } elseif ((int) get_option('hzn_source_photo', 0)) {
@@ -968,7 +970,90 @@ TXT;
         return null;
     }
 
-    private function sideload($url, $post_id, $alt, $credit) {
+    /**
+     * v3.57.1: imaginea dată de sursă NU e poza știrii, ci sigla / imaginea ei generică?
+     * (Știrile fără poză proprie - de obicei cele cu video - au ca og:image sigla publicației;
+     * așa a ajuns sigla Digi24 cover pe site.) '' = pare poză reală.
+     */
+    public static function generic_image_reason($path, $url) {
+        global $wpdb;
+        $file = (string) wp_parse_url($url, PHP_URL_PATH);
+        if (preg_match('#(logo|placeholder|favicon|default[-_]?(image|img|share|og|thumb)|og[-_]?default|share[-_]?default|no[-_]?(image|photo|img|thumb))#i', $file)) {
+            return 'sursa a dat o imagine generică (după nume), nu poza știrii';
+        }
+        // Aceeași adresă de imagine la altă știre = imaginea comună a publicației.
+        $used = $wpdb->get_var($wpdb->prepare(
+            "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_wp_attached_file' AND meta_value LIKE %s LIMIT 1",
+            '%-' . $wpdb->esc_like(substr(md5($url), 0, 6)) . '.%'
+        ));
+        if ($used) { return 'sursa a dat aceeași imagine ca la altă știre (imagine generică), nu poza știrii'; }
+        if (self::is_flat_graphic($path)) { return 'sursa a dat o siglă / grafică, nu o fotografie'; }
+        return '';
+    }
+
+    /**
+     * Grafică plată (siglă, fundal uni cu text) sau fotografie? Imaginea micșorată, culorile
+     * grupate în 512 nuanțe: la o siglă, 5 nuanțe acoperă aproape tot; la o fotografie, nu.
+     */
+    public static function is_flat_graphic($path) {
+        if (!function_exists('imagecreatefromstring') || !is_readable($path)) { return false; }
+        $im = @imagecreatefromstring((string) @file_get_contents($path));
+        if (!$im) { return false; }
+        $w = 64; $h = 36;
+        $small = imagecreatetruecolor($w, $h);
+        imagefill($small, 0, 0, imagecolorallocate($small, 255, 255, 255));
+        imagecopyresampled($small, $im, 0, 0, 0, 0, $w, $h, imagesx($im), imagesy($im));
+        $bins = array();
+        for ($y = 0; $y < $h; $y++) {
+            for ($x = 0; $x < $w; $x++) {
+                $c = imagecolorat($small, $x, $y);
+                $k = ((($c >> 16) & 255) >> 5) . '-' . ((($c >> 8) & 255) >> 5) . '-' . (($c & 255) >> 5);
+                $bins[$k] = isset($bins[$k]) ? $bins[$k] + 1 : 1;
+            }
+        }
+        imagedestroy($im); imagedestroy($small);
+        rsort($bins);
+        return array_sum(array_slice($bins, 0, 5)) / ($w * $h) >= 0.95;
+    }
+
+    /**
+     * v3.57.1: știrile deja publicate care au sigla sursei drept cover (lista o face
+     * actualizarea pluginului) primesc o imagine nouă, câte două pe rulare.
+     */
+    public function fix_generic_covers() {
+        $queue = get_option('hzn_logo_check', array());
+        if (!is_array($queue) || empty($queue)) { return; }
+        $done = 0;
+        foreach ($queue as $post_id => $tries) {
+            if ($done >= 2) { break; }
+            $done++;
+            $thumb = (int) get_post_thumbnail_id($post_id);
+            $file  = $thumb > 0 ? get_attached_file($thumb) : '';
+            if (!$file || !self::is_flat_graphic($file)) { unset($queue[$post_id]); continue; }
+            if (!class_exists('HZ_ImageGen') || !HZ_ImageGen::has_key()) { break; } // fără cheie: mai încercăm
+
+            $title = get_the_title($post_id);
+            $new = CW_Usage::with_context('imagini', function () use ($title, $post_id) {
+                return HZ_ImageGen::sideload($title, $post_id, $title, '', self::collage_prompt($title));
+            });
+            if (is_wp_error($new)) {
+                if ((int) $tries >= 2) { unset($queue[$post_id]); } else { $queue[$post_id] = (int) $tries + 1; }
+                continue;
+            }
+            set_post_thumbnail($post_id, (int) $new);
+            wp_delete_attachment($thumb, true);
+            $content = (string) get_post_field('post_content', $post_id);
+            $clean   = preg_replace('#\s*<p class="hz-photo-credit">.*?</p>#s', '', $content);
+            if ($clean !== $content) { wp_update_post(array('ID' => $post_id, 'post_content' => wp_slash($clean))); }
+            $note = 'ai (în locul siglei sursei)';
+            if ((int) get_option('hzn_nsi_banner', 1)) { $note .= ' · ' . $this->nsi_banner($post_id); }
+            update_post_meta($post_id, '_hzn_image', $note);
+            unset($queue[$post_id]);
+        }
+        update_option('hzn_logo_check', $queue, 'no');
+    }
+
+    private function sideload($url, $post_id, $alt, $credit, $check_generic = false) {
         require_once ABSPATH . 'wp-admin/includes/media.php';
         require_once ABSPATH . 'wp-admin/includes/file.php';
         require_once ABSPATH . 'wp-admin/includes/image.php';
@@ -988,6 +1073,10 @@ TXT;
         $mime = function_exists('wp_get_image_mime') ? (string) wp_get_image_mime($tmp) : '';
         $exts = array('image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp', 'image/gif' => 'gif', 'image/avif' => 'avif');
         if (!isset($exts[$mime])) { @unlink($tmp); return new WP_Error('hzn_img_type', 'fișierul descărcat nu e o imagine (' . ($mime !== '' ? $mime : 'necunoscut') . ')'); }
+        if ($check_generic) {
+            $why = self::generic_image_reason($tmp, $url);
+            if ($why !== '') { @unlink($tmp); return new WP_Error('hzn_img_generic', $why); }
+        }
         $ext  = $exts[$mime];
         $name = sanitize_file_name(sanitize_title($alt) . '-' . substr(md5($url), 0, 6) . '.' . $ext);
         // v3.56.0: Google Discover - 16:9, minimum 1200 px lățime (HZ_Discover).

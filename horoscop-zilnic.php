@@ -247,6 +247,21 @@ add_action('init', function () {
     // din HZ_News::default_hosts() (comunicateinpresa.ro, revistabravo.ro).
     HZ_News::seed();
 
+    // v3.57.1: știrile din ultimele 60 de zile care au drept cover poza sursei se verifică o
+    // dată: unde „poza" e de fapt sigla publicației, HZ_News::fix_generic_covers() o înlocuiește.
+    if (!get_option('hzn_logo_listed')) {
+        global $wpdb;
+        $ids = $wpdb->get_col(
+            "SELECT pm.post_id FROM {$wpdb->postmeta} pm JOIN {$wpdb->posts} p ON p.ID = pm.post_id
+             WHERE pm.meta_key = '_hzn_image' AND pm.meta_value LIKE 'sursa%'
+               AND p.post_status IN ('publish','draft','pending','future')
+               AND p.post_date > DATE_SUB(NOW(), INTERVAL 60 DAY)
+             ORDER BY p.ID DESC LIMIT 2000"
+        );
+        if (!empty($ids)) { update_option('hzn_logo_check', array_fill_keys(array_map('intval', $ids), 0), 'no'); }
+        update_option('hzn_logo_listed', 1, 'no');
+    }
+
     update_option('hz_db_version', HZ_VERSION, 'no');
 });
 
