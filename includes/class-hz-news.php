@@ -792,7 +792,7 @@ TXT;
         $img_note = 'fără imagine (bifa „Imagine cover" e oprită)';
         // v3.51.7: bifa „poza originală" pornește singură coverul, chiar dacă bifa
         // generală „Imagine cover" e debifată (altfel ieșea „fără imagine" fără motiv).
-        if ((int) get_option('hzn_images', 1) || (int) get_option('hzn_source_photo', 0)) {
+        if ((int) get_option('hzn_images', 1)) {
             $img = $this->cover($post_id, $rw, $art);
             if (is_wp_error($img)) {
                 $img_note = $img->get_error_message();
@@ -830,17 +830,9 @@ TXT;
      * @return array|WP_Error ['id', 'credit', 'source']
      */
     private function cover($post_id, $rw, $art = array()) {
-        // v3.50.7: poza originală a știrii, NEMODIFICATĂ, cu creditul sursei. Opțiune
-        // oprită implicit; pornită de user pe răspunderea lui (drepturile pozelor de
-        // agenție nu se transferă prin preluare).
-        if ((int) get_option('hzn_source_photo', 0) && !empty($art['image'])) {
-            $credit = isset($art['image_credit']) ? (string) $art['image_credit'] : '';
-            $id = $this->sideload($art['image'], $post_id, $rw['title'], $credit);
-            if (!is_wp_error($id)) { return array('id' => $id, 'credit' => $credit, 'source' => 'sursa'); }
-            $src_err = 'poza sursei: ' . $id->get_error_message();
-        } elseif ((int) get_option('hzn_source_photo', 0)) {
-            $src_err = 'poza sursei: pagina nu are og:image';
-        }
+        // v3.57.1: poza sursei NU se mai folosește deloc (opțiunea „poza originală" e scoasă):
+        // când știrea n-are poză proprie, og:image e chiar sigla publicației, iar pozele
+        // de agenție nu sunt ale noastră. Fiecare știre primește imaginea ei.
         // v3.50.6: căutarea după nume e OPRITĂ implicit — la „Cristian Popa" (BNR) a adus
         // un militar american cu același nume. Fiecare știre primește colajul AI.
         if ($rw['entity'] !== '' && (int) get_option('hzn_free_photos', 0)) {
@@ -1073,7 +1065,7 @@ TXT;
         $opts = array(
             'hzn_enabled' => 'absint', 'hzn_per_cat' => 'absint', 'hzn_start_hour' => 'absint',
             'hzn_end_hour' => 'absint', 'hzn_status' => 'sanitize_key', 'hzn_model' => 'sanitize_text_field',
-            'hzn_author' => 'absint', 'hzn_images' => 'absint', 'hzn_free_photos' => 'absint', 'hzn_source_photo' => 'absint', 'hzn_nsi_banner' => 'absint', 'hzn_exclude' => 'sanitize_text_field', 'hzn_max_age' => 'absint', 'hzn_rss_url' => 'esc_url_raw',
+            'hzn_author' => 'absint', 'hzn_images' => 'absint', 'hzn_free_photos' => 'absint', 'hzn_nsi_banner' => 'absint', 'hzn_exclude' => 'sanitize_text_field', 'hzn_max_age' => 'absint', 'hzn_rss_url' => 'esc_url_raw',
         );
         foreach (array_keys(self::sections()) as $key) {
             $opts['hzn_on_' . $key]  = 'absint';
@@ -1218,8 +1210,6 @@ TXT;
                         <td>
                             <input type="hidden" name="hzn_images" value="0" />
                             <label><input type="checkbox" name="hzn_images" value="1" <?php checked(1, (int) get_option('hzn_images', 1)); ?> /> <?php esc_html_e('Colaj AI generat din conținutul știrii (~$0,05)', 'horoscop-zilnic'); ?></label><br />
-                            <input type="hidden" name="hzn_source_photo" value="0" />
-                            <label><input type="checkbox" name="hzn_source_photo" value="1" <?php checked(1, (int) get_option('hzn_source_photo', 0)); ?> /> <?php esc_html_e('Folosește poza originală a știrii, cu creditul sursei („Foto: …”), pe răspunderea ta: pozele de agenție (Profimedia, Inquam etc.) pot aduce facturi pentru drepturi de autor', 'horoscop-zilnic'); ?></label><br />
                             <input type="hidden" name="hzn_nsi_banner" value="0" />
                             <label><input type="checkbox" name="hzn_nsi_banner" value="1" <?php checked(1, (int) get_option('hzn_nsi_banner', 1)); ?> <?php disabled(!class_exists('Next_Stage_Image')); ?> /> <?php esc_html_e('Generează și imaginea Social Media cu banner (Next Stage Image), ca butonul „Generează imagine”', 'horoscop-zilnic'); ?><?php if (!class_exists('Next_Stage_Image')) { echo ' — ' . esc_html__('pluginul nu e activ pe site', 'horoscop-zilnic'); } ?></label><br />
                             <input type="hidden" name="hzn_free_photos" value="0" />
