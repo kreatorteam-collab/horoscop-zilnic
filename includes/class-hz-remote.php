@@ -18,6 +18,7 @@ if (!defined('ABSPATH')) { exit; }
  *   hz/v1/control  -> start | stop | retry | clear
  *   hz/v1/settings -> suprascrie chei API, cheia Magnific, modelul implicit, limitele,
  *                     horoscopul (v3.58.0: pornit/oprit, săptămânal/zilnic, ziua, titlul)
+ *                     și coperta lui (v3.59.0: `horoscope_image`, poza ca base64)
  *   hz/v1/costs    -> cheltuiala AI pe zi, defalcata pe modul si pe model
  *   hz/v1/reimage  -> reface pozele articolelor deja publicate dintr-un lot (alt stil/sursa)
  *   hz/v1/upgrade  -> v3.53.0: actualizeaza pluginul ACUM din repo-ul GitHub (nu mai
@@ -67,6 +68,52 @@ class HZ_Remote {
             return new WP_REST_Response(array('error' => 'stale_request'), 403);
         }
         return $data;
+    }
+
+    /* ---------- coperta horoscopului ---------- */
+
+    /** URL-ul copertei curente a horoscopului, sau '' dacă nu e setată / nu mai există. */
+    private static function horoscope_image_url() {
+        $id = (int) get_option('hz_image', 0);
+        if ($id <= 0 || !wp_attachment_is_image($id)) { return ''; }
+        return (string) wp_get_attachment_url($id);
+    }
+
+    /**
+     * v3.59.0: pune în Media coperta horoscopului primită ca base64 (JPG / PNG / WEBP).
+     * Intră așa cum e, nedecupată: HZ_Discover::fit_sideload ar tăia-o la 16:9, iar
+     * coperta are textul desenat în ea.
+     * @return int|WP_Error ID-ul atașamentului
+     */
+    private static function import_horoscope_image($b64, $name, $alt) {
+        if (!class_exists('HZ_Uploads')) {
+            return new WP_Error('no_module', 'Modulul de poze încărcate lipsește.');
+        }
+        $token = HZ_Uploads::store($b64);
+        if (is_wp_error($token)) { return $token; }
+        $path = HZ_Uploads::path($token);
+
+        require_once ABSPATH . 'wp-admin/includes/media.php';
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+        require_once ABSPATH . 'wp-admin/includes/image.php';
+
+        $name = sanitize_title(mb_substr((string) $name, 0, 80));
+        if ($name === '') { $name = 'horoscop'; }
+        $ext = pathinfo($token, PATHINFO_EXTENSION);
+
+        // media_handle_sideload MUTĂ fișierul în folderul lunii; la eroare îl ștergem noi.
+        $att = media_handle_sideload(array('name' => $name . '.' . $ext, 'tmp_name' => $path), 0, 'Horoscop');
+        if (is_wp_error($att)) {
+            HZ_Uploads::delete($token);
+            return $att;
+        }
+        if (is_file($path)) { @unlink($path); }
+
+        $alt = sanitize_text_field((string) $alt);
+        if ($alt !== '') {
+            update_post_meta((int) $att, '_wp_attachment_image_alt', $alt);
+        }
+        return (int) $att;
     }
 
     /* ---------- rute ---------- */
@@ -212,6 +259,9 @@ class HZ_Remote {
             'horoscope_last_week' => (string) get_option('hz_last_week', ''),
             'horoscope_title'     => HZ_Horoscope::is_weekly() ? HZ_Horoscope::week_title_template() : (string) get_option('hz_title', HZ_Horoscope::default_title()),
             'horoscope_error'     => (string) get_option('hz_last_error', ''),
+            // v3.59.0: coperta refolosită la fiecare horoscop (0 = fără copertă).
+            'horoscope_image'     => (int) get_option('hz_image', 0),
+            'horoscope_image_url' => self::horoscope_image_url(),
             'weather_on'      => (int) get_option('hzw_enabled', 0),
             'weather_hour'    => (int) get_option('hzw_hour', 8),
             'weather_last'    => (string) get_option('hzw_last_run', ''),
@@ -516,6 +566,28 @@ class HZ_Remote {
             $changed[] = 'horoscope_title_variant';
         }
 
+        // v3.59.0: coperta horoscopului (`hz_image`), trimisă din panou ca base64 — câte o
+        // poză proprie fiecărui site, ca rețeaua să nu mai refolosească aceeași copertă.
+        // Coperta veche rămâne în Media, iar ID-ul ei e ținut minte în `hz_image_prev`.
+        // Articolele deja publicate nu se ating.
+        if (isset($set['horoscope_image']) && is_string($set['horoscope_image']) && $set['horoscope_image'] !== '') {
+            $att = self::import_horoscope_image(
+                $set['horoscope_image'],
+                isset($set['horoscope_image_name']) ? (string) $set['horoscope_image_name'] : '',
+                isset($set['horoscope_image_alt']) ? (string) $set['horoscope_image_alt'] : ''
+            );
+            if (is_wp_error($att)) {
+                $skipped[] = 'horoscope_image: ' . $att->get_error_message();
+            } else {
+                $old = (int) get_option('hz_image', 0);
+                if ($old > 0 && $old !== (int) $att) {
+                    update_option('hz_image_prev', $old, 'no');
+                }
+                update_option('hz_image', (int) $att);
+                $changed[] = 'horoscope_image';
+            }
+        }
+
         // Modulul Știri: pornit/oprit (0/1 explicit, ca la căutarea web), câte pe secțiune, modelul.
         if (isset($set['news_enabled']) && $set['news_enabled'] !== '') {
             update_option('hzn_enabled', (int) !!$set['news_enabled'], 'no');
@@ -595,6 +667,8 @@ class HZ_Remote {
                 'horoscope_frequency' => HZ_Horoscope::is_weekly() ? 'weekly' : 'daily',
                 'horoscope_weekday'   => HZ_Horoscope::weekday(),
                 'horoscope_title'     => HZ_Horoscope::is_weekly() ? HZ_Horoscope::week_title_template() : (string) get_option('hz_title', HZ_Horoscope::default_title()),
+                'horoscope_image'     => (int) get_option('hz_image', 0),
+                'horoscope_image_url' => self::horoscope_image_url(),
                 'weather_model'  => (string) get_option('hzw_model', ''),
                 'ai_model'       => CW_API::resolve_model(''),
                 'ai_month_limit' => (float) get_option('cw_monthly_cost_limit', 0),
