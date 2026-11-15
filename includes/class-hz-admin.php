@@ -200,8 +200,8 @@ class HZ_Admin {
                         <td>
                             <?php $wd = HZ_Horoscope::weekday(); ?>
                             <select name="hz_weekday" id="hz_weekday">
+                                <option value="1" <?php selected(1, $wd); ?>><?php esc_html_e('Luni dimineața, pentru săptămâna în curs (recomandat)', 'horoscop-zilnic'); ?></option>
                                 <option value="7" <?php selected(7, $wd); ?>><?php esc_html_e('Duminică, pentru săptămâna care începe a doua zi', 'horoscop-zilnic'); ?></option>
-                                <option value="1" <?php selected(1, $wd); ?>><?php esc_html_e('Luni, pentru săptămâna în curs', 'horoscop-zilnic'); ?></option>
                             </select>
                             <p class="description"><?php esc_html_e('Dacă site-ul e căzut în ziua respectivă, articolul se publică a doua zi.', 'horoscop-zilnic'); ?></p>
                         </td>

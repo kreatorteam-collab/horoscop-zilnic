@@ -3,7 +3,7 @@
  * Plugin Name: AI Writer & Conținut Zilnic
  * Plugin URI: https://targetseo.ro/
  * Description: Generează și rescrie articole SEO direct în editor (GPT-5.6 și Claude), creează articole în bulk cu imagini de stock relevante (Magnific) și publică automat conținut: horoscopul (săptămânal sau zilnic) cu toate cele 12 zodii și vremea pe regiuni (date oficiale ANM). Un singur plugin: chei API, costuri, editor, bulk, horoscop și vreme.
- * Version: 3.58.0
+ * Version: 3.58.1
  * Author: Eduard / TargetSEO
  * Text Domain: horoscop-zilnic
  * Requires at least: 5.6
@@ -15,7 +15,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('HZ_VERSION', '3.58.0');
+define('HZ_VERSION', '3.58.1');
 define('HZ_PATH', plugin_dir_path(__FILE__));
 define('HZ_URL', plugin_dir_url(__FILE__));
 
@@ -179,7 +179,7 @@ add_action('init', function () {
     // fiecare zi (jumătate din articolele Women & Lifestyle), cu valoare de o zi. Trecem
     // TOATĂ flota pe săptămânal O SINGURĂ DATĂ (flag propriu): dacă un site e pus apoi
     // înapoi pe zilnic (wp-admin sau Setări flotă din panou), update-urile nu-l mai ating.
-    add_option('hz_weekday', 7, '', 'no');
+    add_option('hz_weekday', 1, '', 'no');
     add_option('hz_week_title', '', '', 'no');
     add_option('hz_week_prompt', HZ_Horoscope::default_week_prompt(), '', 'no');
     add_option('hz_week_system_prompt', HZ_Horoscope::default_week_system_prompt(), '', 'no');
@@ -187,6 +187,13 @@ add_action('init', function () {
     if (!get_option('hz_weekly_forced')) {
         update_option('hz_frequency', 'weekly', 'no');
         update_option('hz_weekly_forced', 1, 'no');
+    }
+    // v3.58.1: horoscopul săptămânal iese LUNEA dimineața („Horoscop săptămâna 16 - 22
+    // noiembrie"), nu duminica. O singură dată pe toată flota; după aceea ziua aleasă
+    // din wp-admin / Setări flotă rămâne cum a fost pusă.
+    if (!get_option('hz_monday_forced')) {
+        update_option('hz_weekday', 1, 'no');
+        update_option('hz_monday_forced', 1, 'no');
     }
 
     // v3.0.0: modul nou „Vreme" (articol zilnic cu prognoza pe regiuni, sursă ANM).
@@ -341,12 +348,13 @@ register_activation_hook(__FILE__, function () {
         'hz_auto_update'   => 1,
         // v3.58.0: horoscop săptămânal (implicit)
         'hz_frequency'          => 'weekly',
-        'hz_weekday'            => 7,
+        'hz_weekday'            => 1,
         'hz_week_title'         => '',
         'hz_week_prompt'        => HZ_Horoscope::default_week_prompt(),
         'hz_week_system_prompt' => HZ_Horoscope::default_week_system_prompt(),
         'hz_week_source_url'    => '',
         'hz_weekly_forced'      => 1,
+        'hz_monday_forced'      => 1,
         // Modul Vreme (v3.0.0)
         'hzw_enabled'       => 0,
         'hzw_hour'          => 8,
