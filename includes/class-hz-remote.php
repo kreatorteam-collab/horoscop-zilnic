@@ -16,7 +16,8 @@ if (!defined('ABSPATH')) { exit; }
  *   hz/v1/enqueue  -> adaugă articole în coadă
  *   hz/v1/status   -> progresul unui lot
  *   hz/v1/control  -> start | stop | retry | clear
- *   hz/v1/settings -> suprascrie chei API, cheia Magnific, modelul implicit, limitele
+ *   hz/v1/settings -> suprascrie chei API, cheia Magnific, modelul implicit, limitele,
+ *                     horoscopul (v3.58.0: pornit/oprit, săptămânal/zilnic, ziua, titlul)
  *   hz/v1/costs    -> cheltuiala AI pe zi, defalcata pe modul si pe model
  *   hz/v1/reimage  -> reface pozele articolelor deja publicate dintr-un lot (alt stil/sursa)
  *   hz/v1/upgrade  -> v3.53.0: actualizeaza pluginul ACUM din repo-ul GitHub (nu mai
@@ -204,6 +205,13 @@ class HZ_Remote {
             'horoscope_hour'  => (int) get_option('hz_hour', 7),
             'horoscope_last'  => (string) get_option('hz_last_run', ''),
             'horoscope_model' => (string) get_option('hz_model', ''),
+            // v3.58.0: săptămânal / zilnic, ziua (7 = duminică, 1 = luni), ultima săptămână
+            // publicată (lunea ei), formularea titlului și ultima eroare.
+            'horoscope_frequency' => HZ_Horoscope::is_weekly() ? 'weekly' : 'daily',
+            'horoscope_weekday'   => HZ_Horoscope::weekday(),
+            'horoscope_last_week' => (string) get_option('hz_last_week', ''),
+            'horoscope_title'     => HZ_Horoscope::is_weekly() ? HZ_Horoscope::week_title_template() : (string) get_option('hz_title', HZ_Horoscope::default_title()),
+            'horoscope_error'     => (string) get_option('hz_last_error', ''),
             'weather_on'      => (int) get_option('hzw_enabled', 0),
             'weather_hour'    => (int) get_option('hzw_hour', 8),
             'weather_last'    => (string) get_option('hzw_last_run', ''),
@@ -484,6 +492,30 @@ class HZ_Remote {
             $changed[] = $field;
         }
 
+        // v3.58.0: horoscopul — pornit/oprit (0/1 explicit), frecvența, ziua și formularea
+        // titlului săptămânal (indexul dat de panou, ca formulările să nu se repete în flotă).
+        if (isset($set['horoscope_enabled']) && $set['horoscope_enabled'] !== '') {
+            update_option('hz_enabled', (int) !!$set['horoscope_enabled'], 'no');
+            $changed[] = 'horoscope_enabled';
+        }
+        if (isset($set['horoscope_frequency']) && $set['horoscope_frequency'] !== '') {
+            $fq = (string) $set['horoscope_frequency'];
+            if (in_array($fq, array('daily', 'weekly'), true)) {
+                update_option('hz_frequency', $fq, 'no');
+                $changed[] = 'horoscope_frequency';
+            } else {
+                $skipped[] = 'horoscope_frequency necunoscut: ' . $fq;
+            }
+        }
+        if (isset($set['horoscope_weekday']) && $set['horoscope_weekday'] !== '') {
+            update_option('hz_weekday', (int) $set['horoscope_weekday'] === 1 ? 1 : 7, 'no');
+            $changed[] = 'horoscope_weekday';
+        }
+        if (isset($set['horoscope_title_variant']) && $set['horoscope_title_variant'] !== '' && is_numeric($set['horoscope_title_variant'])) {
+            update_option('hz_week_title_variant', max(0, (int) $set['horoscope_title_variant']), 'no');
+            $changed[] = 'horoscope_title_variant';
+        }
+
         // Modulul Știri: pornit/oprit (0/1 explicit, ca la căutarea web), câte pe secțiune, modelul.
         if (isset($set['news_enabled']) && $set['news_enabled'] !== '') {
             update_option('hzn_enabled', (int) !!$set['news_enabled'], 'no');
@@ -559,6 +591,10 @@ class HZ_Remote {
                 'ai_anthropic'   => CW_API::has_provider_key('anthropic'),
                 'ai_model_set'   => (string) get_option('cw_default_model', ''),
                 'horoscope_model'=> (string) get_option('hz_model', ''),
+                'horoscope_on'        => (int) get_option('hz_enabled', 0),
+                'horoscope_frequency' => HZ_Horoscope::is_weekly() ? 'weekly' : 'daily',
+                'horoscope_weekday'   => HZ_Horoscope::weekday(),
+                'horoscope_title'     => HZ_Horoscope::is_weekly() ? HZ_Horoscope::week_title_template() : (string) get_option('hz_title', HZ_Horoscope::default_title()),
                 'weather_model'  => (string) get_option('hzw_model', ''),
                 'ai_model'       => CW_API::resolve_model(''),
                 'ai_month_limit' => (float) get_option('cw_monthly_cost_limit', 0),

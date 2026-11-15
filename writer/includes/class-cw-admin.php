@@ -119,7 +119,7 @@ class CW_Admin {
 
             <h2 class="nav-tab-wrapper" style="margin-bottom:16px;">
                 <a href="<?php echo esc_url($base_url); ?>" class="nav-tab <?php echo $tab === 'writer' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('AI Writer', 'claude-writer'); ?></a>
-                <a href="<?php echo esc_url($base_url . '&tab=horoscop'); ?>" class="nav-tab <?php echo $tab === 'horoscop' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Horoscop Zilnic', 'claude-writer'); ?></a>
+                <a href="<?php echo esc_url($base_url . '&tab=horoscop'); ?>" class="nav-tab <?php echo $tab === 'horoscop' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Horoscop', 'claude-writer'); ?></a>
                 <a href="<?php echo esc_url($base_url . '&tab=vreme'); ?>" class="nav-tab <?php echo $tab === 'vreme' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Vreme', 'claude-writer'); ?></a>
                 <a href="<?php echo esc_url($base_url . '&tab=bulk'); ?>" class="nav-tab <?php echo $tab === 'bulk' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Articole Bulk', 'claude-writer'); ?></a>
                 <a href="<?php echo esc_url($base_url . '&tab=stiri'); ?>" class="nav-tab <?php echo $tab === 'stiri' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Știri', 'claude-writer'); ?></a>

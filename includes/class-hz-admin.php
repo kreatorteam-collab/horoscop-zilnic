@@ -2,7 +2,7 @@
 if (!defined('ABSPATH')) { exit; }
 
 /**
- * Pagina de setări: Setări → Horoscop Zilnic.
+ * Pagina de setări: Setări → AI Writer & Horoscop (tab Horoscop: zilnic sau săptămânal).
  */
 class HZ_Admin {
 
@@ -68,6 +68,13 @@ class HZ_Admin {
             'hz_prompt'        => 'hz_sanitize_prompt',
             'hz_system_prompt' => 'hz_sanitize_prompt',
             'hz_auto_update'   => 'absint',
+            // v3.58.0: horoscop săptămânal.
+            'hz_frequency'          => function ($v) { return $v === 'daily' ? 'daily' : 'weekly'; },
+            'hz_weekday'            => function ($v) { return (int) $v === 1 ? 1 : 7; },
+            'hz_week_title'         => 'hz_sanitize_prompt',
+            'hz_week_prompt'        => 'hz_sanitize_prompt',
+            'hz_week_system_prompt' => 'hz_sanitize_prompt',
+            'hz_week_source_url'    => 'esc_url_raw',
         );
         foreach ($opts as $name => $cb) {
             register_setting('hz_settings', $name, array('sanitize_callback' => $cb));
@@ -137,17 +144,23 @@ class HZ_Admin {
         ));
     }
 
-    /** Conținutul tab-ului „Horoscop Zilnic" din pagina unică de setări. */
+    /** Conținutul tab-ului „Horoscop" din pagina unică de setări. */
     public function render_tab() {
         if (!current_user_can('manage_options')) { return; }
 
         $has_key = CW_API::has_key();
         $models  = CW_Models::all();
 
-        $on    = (int) get_option('hz_enabled', 0);
-        $next  = wp_next_scheduled(HZ_Horoscope::HOOK);
-        $last  = (string) get_option('hz_last_run', '');
-        $err   = (string) get_option('hz_last_error', '');
+        $on     = (int) get_option('hz_enabled', 0);
+        $next   = wp_next_scheduled(HZ_Horoscope::HOOK);
+        $last   = (string) get_option('hz_last_run', '');
+        $err    = (string) get_option('hz_last_error', '');
+        $weekly = HZ_Horoscope::is_weekly();
+        $lastw  = (string) get_option('hz_last_week', '');
+        if ($weekly) {
+            $nextw = HZ_Horoscope::next_week_publish(HZ_Horoscope::now());
+            $next  = $nextw ? $nextw->getTimestamp() : 0;
+        }
         ?>
             <?php if (!$has_key) : ?>
                 <div class="notice notice-warning"><p><?php esc_html_e('Configurează întâi cheia API (OpenAI sau Anthropic) în Setări → AI Writer.', 'horoscop-zilnic'); ?></p></div>
@@ -155,7 +168,11 @@ class HZ_Admin {
 
             <p style="max-width:640px;">
                 <?php if ($last !== '') { echo esc_html(sprintf(__('Ultima generare: %s.', 'horoscop-zilnic'), $last)) . ' '; } ?>
-                <?php if ($on && $next) { echo esc_html(sprintf(__('Următoarea rulare: %s.', 'horoscop-zilnic'), wp_date('d.m.Y H:i', $next))); } ?>
+                <?php if ($weekly && $lastw !== '') {
+                    $lm = DateTimeImmutable::createFromFormat('!Y-m-d', $lastw, wp_timezone());
+                    if ($lm) { echo esc_html(sprintf(__('Ultimul horoscop săptămânal: %s.', 'horoscop-zilnic'), HZ_Horoscope::interval_label($lm))) . ' '; }
+                } ?>
+                <?php if ($on && $next) { echo esc_html(sprintf($weekly ? __('Următorul horoscop săptămânal: %s.', 'horoscop-zilnic') : __('Următoarea rulare: %s.', 'horoscop-zilnic'), wp_date('d.m.Y H:i', $next))); } ?>
                 <?php if (!$on) { echo '<strong>' . esc_html__('Publicarea automată este oprită.', 'horoscop-zilnic') . '</strong>'; } ?>
                 <?php if ($err !== '') : ?><span style="color:#b32d2e;display:block;"><?php echo esc_html(sprintf(__('Ultima eroare: %s', 'horoscop-zilnic'), $err)); ?></span><?php endif; ?>
             </p>
@@ -167,7 +184,26 @@ class HZ_Admin {
                         <th scope="row"><?php esc_html_e('Publicare automată', 'horoscop-zilnic'); ?></th>
                         <td>
                             <input type="hidden" name="hz_enabled" value="0" />
-                            <label><input type="checkbox" name="hz_enabled" value="1" <?php checked(1, $on); ?> /> <?php esc_html_e('Publică zilnic horoscopul (toate cele 12 zodii, un articol pe zi)', 'horoscop-zilnic'); ?></label>
+                            <label><input type="checkbox" name="hz_enabled" value="1" <?php checked(1, $on); ?> /> <?php esc_html_e('Publică automat horoscopul (toate cele 12 zodii într-un articol)', 'horoscop-zilnic'); ?></label>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><?php esc_html_e('Frecvență', 'horoscop-zilnic'); ?></th>
+                        <td>
+                            <label style="display:block;margin-bottom:4px;"><input type="radio" name="hz_frequency" value="weekly" <?php checked($weekly); ?> /> <?php esc_html_e('Săptămânal (recomandat): un articol pe săptămână, de luni până duminică', 'horoscop-zilnic'); ?></label>
+                            <label style="display:block;"><input type="radio" name="hz_frequency" value="daily" <?php checked(!$weekly); ?> /> <?php esc_html_e('Zilnic: un articol în fiecare zi', 'horoscop-zilnic'); ?></label>
+                            <p class="description"><?php esc_html_e('Horoscopul zilnic apare cu același subiect pe toate site-urile din rețea și nu mai interesează pe nimeni a doua zi. Cel săptămânal e un singur articol mai lung, cu titlu propriu fiecărui site.', 'horoscop-zilnic'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="hz_weekday"><?php esc_html_e('Ziua (săptămânal)', 'horoscop-zilnic'); ?></label></th>
+                        <td>
+                            <?php $wd = HZ_Horoscope::weekday(); ?>
+                            <select name="hz_weekday" id="hz_weekday">
+                                <option value="7" <?php selected(7, $wd); ?>><?php esc_html_e('Duminică, pentru săptămâna care începe a doua zi', 'horoscop-zilnic'); ?></option>
+                                <option value="1" <?php selected(1, $wd); ?>><?php esc_html_e('Luni, pentru săptămâna în curs', 'horoscop-zilnic'); ?></option>
+                            </select>
+                            <p class="description"><?php esc_html_e('Dacă site-ul e căzut în ziua respectivă, articolul se publică a doua zi.', 'horoscop-zilnic'); ?></p>
                         </td>
                     </tr>
                     <tr>
@@ -241,7 +277,7 @@ class HZ_Admin {
                         </td>
                     </tr>
                     <tr>
-                        <th scope="row"><label for="hz_source_url"><?php esc_html_e('Sursă externă (opțional)', 'horoscop-zilnic'); ?></label></th>
+                        <th scope="row"><label for="hz_source_url"><?php esc_html_e('Sursă externă (zilnic, opțional)', 'horoscop-zilnic'); ?></label></th>
                         <td>
                             <input type="url" name="hz_source_url" id="hz_source_url" class="large-text" value="<?php echo esc_attr(get_option('hz_source_url', HZ_Horoscope::default_source_url())); ?>" placeholder="https://exemplu.ro/horoscop-zilnic" />
                             <p class="description"><?php esc_html_e('Textul de la acest URL e preluat, folosit doar ca inspirație și rescris integral. Gol = horoscopul se generează de la zero.', 'horoscop-zilnic'); ?></p>
@@ -265,7 +301,7 @@ class HZ_Admin {
                         </td>
                     </tr>
                     <tr>
-                        <th scope="row"><label for="hz_title"><?php esc_html_e('Titlu', 'horoscop-zilnic'); ?></label></th>
+                        <th scope="row"><label for="hz_title"><?php esc_html_e('Titlu (zilnic)', 'horoscop-zilnic'); ?></label></th>
                         <td>
                             <input type="text" name="hz_title" id="hz_title" class="large-text" value="<?php echo esc_attr(get_option('hz_title', HZ_Horoscope::default_title())); ?>" />
                             <p class="description"><?php esc_html_e('Folosește {{data}} (ex. 16 iulie 2026) și {{zi}} (ex. miercuri).', 'horoscop-zilnic'); ?></p>
@@ -279,10 +315,41 @@ class HZ_Admin {
                         </td>
                     </tr>
                     <tr>
-                        <th scope="row"><label for="hz_system_prompt"><?php esc_html_e('System prompt (stilul horoscopului)', 'horoscop-zilnic'); ?></label></th>
+                        <th scope="row"><label for="hz_system_prompt"><?php esc_html_e('System prompt zilnic', 'horoscop-zilnic'); ?></label></th>
                         <td>
                             <textarea name="hz_system_prompt" id="hz_system_prompt" class="large-text code" rows="14"><?php echo esc_textarea(get_option('hz_system_prompt', HZ_Horoscope::default_system_prompt())); ?></textarea>
                             <p class="description"><?php esc_html_e('Rolul, structura fixă (12 zodii), tonul și regulile anti-AI — DOAR pentru horoscop. La generarea horoscopului înlocuiește system promptul de articole din AI Writer.', 'horoscop-zilnic'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row" colspan="2" style="padding-bottom:0;"><h3 style="margin:8px 0 0;"><?php esc_html_e('Horoscopul săptămânal', 'horoscop-zilnic'); ?></h3></th>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="hz_week_title"><?php esc_html_e('Titlu (săptămânal)', 'horoscop-zilnic'); ?></label></th>
+                        <td>
+                            <input type="text" name="hz_week_title" id="hz_week_title" class="large-text" value="<?php echo esc_attr(get_option('hz_week_title', '')); ?>" placeholder="<?php echo esc_attr(HZ_Horoscope::week_title_template()); ?>" />
+                            <p class="description"><?php esc_html_e('Gol = formularea proprie a acestui site (cea din câmp, estompată), diferită de celelalte site-uri din rețea. Folosește {{interval}} (ex. 16 - 22 noiembrie 2026).', 'horoscop-zilnic'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="hz_week_source_url"><?php esc_html_e('Sursă externă (săptămânal, opțional)', 'horoscop-zilnic'); ?></label></th>
+                        <td>
+                            <input type="url" name="hz_week_source_url" id="hz_week_source_url" class="large-text" value="<?php echo esc_attr(get_option('hz_week_source_url', '')); ?>" placeholder="https://exemplu.ro/horoscop-saptamanal" />
+                            <p class="description"><?php esc_html_e('O pagină cu horoscopul săptămânal, folosită doar ca inspirație și rescrisă integral. Gol = se generează de la zero.', 'horoscop-zilnic'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="hz_week_prompt"><?php esc_html_e('Prompt săptămânal', 'horoscop-zilnic'); ?></label></th>
+                        <td>
+                            <textarea name="hz_week_prompt" id="hz_week_prompt" class="large-text code" rows="3"><?php echo esc_textarea(get_option('hz_week_prompt', HZ_Horoscope::default_week_prompt())); ?></textarea>
+                            <p class="description"><?php esc_html_e('Instrucțiunea trimisă o dată pe săptămână. Folosește {{interval}}.', 'horoscop-zilnic'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="hz_week_system_prompt"><?php esc_html_e('System prompt săptămânal', 'horoscop-zilnic'); ?></label></th>
+                        <td>
+                            <textarea name="hz_week_system_prompt" id="hz_week_system_prompt" class="large-text code" rows="14"><?php echo esc_textarea(get_option('hz_week_system_prompt', HZ_Horoscope::default_week_system_prompt())); ?></textarea>
+                            <p class="description"><?php esc_html_e('Structura horoscopului săptămânal: 12 zodii, câte două paragrafe cu repere pe zile și „Ziua cea mai bună" la final.', 'horoscop-zilnic'); ?></p>
                         </td>
                     </tr>
                     <tr>
@@ -301,7 +368,7 @@ class HZ_Admin {
                 <button type="button" class="button button-secondary" id="hz-test" <?php disabled(!$has_key); ?>><?php esc_html_e('Generează un test (ciornă)', 'horoscop-zilnic'); ?></button>
                 <span id="hz-test-result"></span>
             </p>
-            <p class="description" style="max-width:640px;"><?php esc_html_e('Creează acum o ciornă de probă cu setările SALVATE (salvează întâi modificările; durează 1–2 minute). Nu afectează rularea zilnică și nu publică nimic.', 'horoscop-zilnic'); ?></p>
+            <p class="description" style="max-width:640px;"><?php esc_html_e('Creează acum o ciornă de probă cu setările SALVATE (salvează întâi modificările; durează 1–3 minute), în frecvența aleasă. Nu afectează publicarea automată și nu publică nimic.', 'horoscop-zilnic'); ?></p>
         <?php
     }
 

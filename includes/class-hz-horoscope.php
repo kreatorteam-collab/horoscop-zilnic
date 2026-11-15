@@ -2,10 +2,18 @@
 if (!defined('ABSPATH')) { exit; }
 
 /**
- * Horoscop zilnic automat: un cron WP generează și publică în fiecare zi
- * un articol cu toate cele 12 zodii. Generarea se face prin pluginul
- * Claude Writer (CW_API): aceeași cheie per site, cost tracking,
- * limită lunară și continuare automată.
+ * Horoscop automat: un cron WP generează și publică un articol cu toate cele
+ * 12 zodii. Generarea se face prin pluginul Claude Writer (CW_API): aceeași
+ * cheie per site, cost tracking, limită lunară și continuare automată.
+ *
+ * v3.58.0: două frecvențe (`hz_frequency`):
+ *  - 'weekly' (implicit): un articol pe săptămână, duminica (săptămâna care începe
+ *    a doua zi) sau lunea (săptămâna în curs). Titlul are o formulare proprie
+ *    fiecărui site (vezi week_title_variants), ca rețeaua să nu mai publice același
+ *    titlu pe zeci de domenii;
+ *  - 'daily': comportamentul de dinainte, un articol pe zi.
+ * Cronul rămâne zilnic (la `hz_hour`); în modul săptămânal rulează doar în ziua de
+ * publicare, cu o zi de recuperare dacă site-ul a fost căzut.
  *
  * Opțional, pornește de la o sursă externă (URL): textul e preluat
  * și rescris complet, nu copiat.
@@ -71,31 +79,256 @@ class HZ_Horoscope {
         $this->run(false);
     }
 
+    /* ---- Săptămânal (v3.58.0) ---- */
+
+    public static function is_weekly() {
+        return get_option('hz_frequency', 'weekly') !== 'daily';
+    }
+
+    /** Ziua de publicare a horoscopului săptămânal, ISO: 7 = duminică (implicit), 1 = luni. */
+    public static function weekday() {
+        return (int) get_option('hz_weekday', 7) === 1 ? 1 : 7;
+    }
+
+    /** Momentul curent în fusul orar al site-ului (același ceas ca current_time()). */
+    public static function now() {
+        return function_exists('current_datetime') ? current_datetime() : new DateTimeImmutable('now', wp_timezone());
+    }
+
+    /**
+     * Lunea săptămânii pe care o acoperă horoscopul publicat în ziua $day.
+     * Duminica (dacă duminica e ziua de publicare) = săptămâna care începe mâine;
+     * în rest, săptămâna în curs.
+     */
+    public static function week_monday(DateTimeImmutable $day) {
+        $day = $day->setTime(0, 0, 0);
+        $n   = (int) $day->format('N'); // 1 = luni ... 7 = duminică
+        if ($n === 7 && self::weekday() === 7) {
+            return $day->modify('+1 day');
+        }
+        return $day->modify('-' . ($n - 1) . ' days');
+    }
+
+    /**
+     * Săptămâna de publicat ACUM, sau null dacă nu e momentul: în ziua de publicare
+     * sau cel mult o zi după (site căzut / cron sărit). Mai târziu nu publicăm: un
+     * horoscop săptămânal apărut miercuri ar acoperi zile deja trecute.
+     */
+    public static function week_due(DateTimeImmutable $now) {
+        $monday = self::week_monday($now);
+        $pub    = self::weekday() === 7 ? $monday->modify('-1 day') : $monday;
+        $today  = $now->setTime(0, 0, 0);
+        if ($today < $pub) { return null; }
+        return (int) $pub->diff($today)->days <= 1 ? $monday : null;
+    }
+
+    /** Data următoarei publicări săptămânale (pentru afișare în setări). */
+    public static function next_week_publish(DateTimeImmutable $now) {
+        $hour  = max(0, min(23, (int) get_option('hz_hour', 7)));
+        $today = $now->setTime(0, 0, 0);
+        for ($i = 0; $i <= 8; $i++) {
+            $d = $today->modify('+' . $i . ' days');
+            if ((int) $d->format('N') !== self::weekday()) { continue; }
+            $at = $d->setTime($hour, 0, 0);
+            if ($at <= $now && get_option('hz_last_week', '') === self::week_monday($d)->format('Y-m-d')) { continue; }
+            return $at;
+        }
+        return null;
+    }
+
+    const MONTHS = array(1 => 'ianuarie', 'februarie', 'martie', 'aprilie', 'mai', 'iunie',
+        'iulie', 'august', 'septembrie', 'octombrie', 'noiembrie', 'decembrie');
+
+    /** „16 - 22 noiembrie 2026", „30 noiembrie - 6 decembrie 2026", „29 decembrie 2025 - 4 ianuarie 2026". */
+    public static function interval_label(DateTimeImmutable $monday) {
+        $sunday = $monday->modify('+6 days');
+        $d1 = (int) $monday->format('j'); $m1 = (int) $monday->format('n'); $y1 = $monday->format('Y');
+        $d2 = (int) $sunday->format('j'); $m2 = (int) $sunday->format('n'); $y2 = $sunday->format('Y');
+        if ($y1 !== $y2) {
+            return $d1 . ' ' . self::MONTHS[$m1] . ' ' . $y1 . ' - ' . $d2 . ' ' . self::MONTHS[$m2] . ' ' . $y2;
+        }
+        if ($m1 !== $m2) {
+            return $d1 . ' ' . self::MONTHS[$m1] . ' - ' . $d2 . ' ' . self::MONTHS[$m2] . ' ' . $y2;
+        }
+        return $d1 . ' - ' . $d2 . ' ' . self::MONTHS[$m2] . ' ' . $y2;
+    }
+
+    /**
+     * Formulările de titlu: 10 începuturi x 8 finaluri = 80 de variante. Fiecare site
+     * primește una (de la panou, `hz_week_title_variant`, ca să nu se repete în flotă;
+     * altfel după domeniu), deci titlul diferă între site-uri dar rămâne același, de
+     * la o săptămână la alta, pe același site.
+     */
+    public static function week_title_variants() {
+        $heads = array(
+            'Horoscop săptămânal {{interval}}',
+            'Horoscopul săptămânii {{interval}}',
+            'Horoscop pentru săptămâna {{interval}}',
+            'Horoscopul săptămânal {{interval}}',
+            'Horoscop {{interval}}',
+            'Horoscopul pe săptămâna {{interval}}',
+            'Horoscop săptămânal pentru {{interval}}',
+            'Horoscop complet {{interval}}',
+            'Săptămâna {{interval}} în horoscop',
+            'Horoscop, săptămâna {{interval}}',
+        );
+        $tails = array(
+            '. Previziuni pentru toate zodiile',
+            ': ce aduce pentru fiecare zodie',
+            '. Dragoste, bani și carieră',
+            ': previziuni pentru cele 12 zodii',
+            '. Ce urmează pentru fiecare zodie',
+            '. Sfaturi pentru toate cele 12 zodii',
+            ': dragoste, muncă și stare de spirit',
+            '. De luni până duminică, zodie cu zodie',
+        );
+        $out = array();
+        foreach ($tails as $t) {
+            foreach ($heads as $h) {
+                $out[] = $h . $t;
+            }
+        }
+        return $out; // indexul i = începutul i % 10, finalul intdiv(i, 10)
+    }
+
+    /** Șablonul de titlu săptămânal al site-ului: cel scris în setări, altfel varianta lui. */
+    public static function week_title_template() {
+        $own = trim((string) get_option('hz_week_title', ''));
+        if ($own !== '') { return $own; }
+        $variants = self::week_title_variants();
+        $idx = get_option('hz_week_title_variant', '');
+        if ($idx === '' || $idx === false || !is_numeric($idx)) {
+            $host = strtolower((string) wp_parse_url(home_url(), PHP_URL_HOST));
+            $idx  = (int) sprintf('%u', crc32(preg_replace('/^www\./', '', $host)));
+        }
+        return $variants[((int) $idx) % count($variants)];
+    }
+
+    private function generate_week_post($test, DateTimeImmutable $monday) {
+        $interval = self::interval_label($monday);
+        $data = date_i18n('j F Y', current_time('timestamp'));
+        $zi   = date_i18n('l', current_time('timestamp'));
+        $vars = array('{{interval}}', '{{data}}', '{{zi}}');
+        $vals = array($interval, $data, $zi);
+
+        $prompt = (string) get_option('hz_week_prompt', '');
+        if (trim($prompt) === '') {
+            $prompt = self::default_week_prompt();
+        }
+        $prompt = str_replace($vars, $vals, $prompt);
+
+        $source_url = trim((string) get_option('hz_week_source_url', ''));
+        if ($source_url !== '') {
+            $source = $this->fetch_source($source_url);
+            if ($source !== '') {
+                $prompt .= "\n\nFolosește DOAR ca sursă de inspirație pentru previziuni horoscopul de mai jos. "
+                    . "RESCRIE totul complet, în cuvintele tale, cu structura cerută mai sus. "
+                    . "NU copia formulări, propoziții sau titluri din sursă. "
+                    . "OBLIGATORIU: nu menționa NICIODATĂ sursa, niciun nume de site, publicație, brand, autor sau URL - "
+                    . "articolul trebuie să pară scris integral și original de redacția noastră, fără nicio trimitere la altă publicație.\n\nSURSĂ:\n" . $source;
+            }
+        }
+
+        $model  = CW_API::resolve_model((string) get_option('hz_model', ''));
+        $system = trim((string) get_option('hz_week_system_prompt', ''));
+        if ($system === '') {
+            $system = self::default_week_system_prompt();
+        }
+        $override = function () use ($system) { return $system; };
+        add_filter('cw_system_prompt', $override);
+        // ~2.500 de cuvinte: cerem din start loc suficient (continuarea automată rămâne plasa de siguranță).
+        $result = CW_Usage::with_context('horoscop', function () use ($model, $prompt) {
+            return CW_API::no_web(function () use ($model, $prompt) {
+                return CW_API::generate($model, $prompt, 12000);
+            });
+        });
+        remove_filter('cw_system_prompt', $override);
+
+        if (is_wp_error($result)) {
+            return $result;
+        }
+
+        $content = $this->clean_html($result['text']);
+        if ($source_url !== '') {
+            $content = $this->scrub_source_mentions($content, $source_url);
+        }
+        $h2 = preg_match_all('/<h2[\s>]/i', $content);
+        if (strlen($content) < 3000 || $h2 < 12) {
+            return new WP_Error('hz_short', sprintf('Horoscop săptămânal incomplet (%d caractere, %d din 12 zodii).', strlen($content), (int) $h2));
+        }
+
+        $title = str_replace($vars, $vals, self::week_title_template());
+
+        $status = $test ? 'draft' : (string) get_option('hz_status', 'publish');
+        if (!in_array($status, array('publish', 'draft', 'pending'), true)) {
+            $status = 'publish';
+        }
+
+        $post_id = wp_insert_post(wp_slash(array(
+            'post_title'    => wp_strip_all_tags($title),
+            'post_content'  => $content,
+            'post_status'   => $status,
+            'post_author'   => $this->author_id(),
+            'post_category' => array($this->category_id()),
+        )), true);
+
+        if (is_wp_error($post_id)) {
+            return $post_id;
+        }
+        update_post_meta($post_id, '_hz_horoscope', current_time('Y-m-d'));
+        update_post_meta($post_id, '_hz_horoscope_week', $monday->format('Y-m-d'));
+
+        $image_id = (int) get_option('hz_image', 0);
+        if ($image_id > 0 && wp_attachment_is_image($image_id)) {
+            set_post_thumbnail($post_id, $image_id);
+        }
+
+        return array(
+            'post_id'   => $post_id,
+            'edit_link' => get_edit_post_link($post_id, 'raw'),
+            'cost'      => isset($result['cost']) ? (float) $result['cost'] : 0.0,
+        );
+    }
+
     /**
      * @param bool $test true = rulare manuală de probă (creează DRAFT, ignoră dedup-ul zilnic)
      * @return array|WP_Error array('post_id','edit_link','cost') la succes
      */
     public function run($test = false) {
         if (!$test && !(int) get_option('hz_enabled', 0)) {
-            return new WP_Error('hz_off', 'Horoscopul zilnic este dezactivat.');
+            return new WP_Error('hz_off', 'Horoscopul automat este dezactivat.');
         }
+
+        $today  = current_time('Y-m-d');
+        $weekly = self::is_weekly();
+        $monday = null;
+        if ($weekly) {
+            // Testul ia săptămâna după aceeași regulă (oricând, ca ciornă); rularea
+            // automată doar săptămâna aflată în fereastra de publicare.
+            $monday = $test ? self::week_monday(self::now()) : self::week_due(self::now());
+            if (!$monday) {
+                return new WP_Error('hz_not_due', 'Azi nu e ziua horoscopului săptămânal.');
+            }
+            if (!$test && get_option('hz_last_week', '') === $monday->format('Y-m-d')) {
+                return new WP_Error('hz_done', 'Horoscopul săptămânii ' . self::interval_label($monday) . ' există deja.');
+            }
+        } elseif (!$test && get_option('hz_last_run', '') === $today) {
+            return new WP_Error('hz_done', 'Horoscopul de azi există deja.');
+        }
+        // Cheile se verifică DUPĂ „e ziua?": în modul săptămânal cronul trece zilnic, iar
+        // o cheie lipsă ar umple altfel „Ultima eroare" în zilele în care nu se publică.
         if (!class_exists('CW_API')) {
             return $this->fail('Motorul AI Writer nu este încărcat.');
         }
         if (!CW_API::has_key()) {
             return $this->fail('Nicio cheie API configurată în Setări → AI Writer.');
         }
-
-        $today = current_time('Y-m-d');
-        if (!$test && get_option('hz_last_run', '') === $today) {
-            return new WP_Error('hz_done', 'Horoscopul de azi există deja.');
-        }
         if (get_transient(self::LOCK)) {
             return new WP_Error('hz_lock', 'O generare este deja în curs.');
         }
         set_transient(self::LOCK, 1, 15 * MINUTE_IN_SECONDS);
 
-        $result = $this->generate_post($test);
+        $result = $weekly ? $this->generate_week_post($test, $monday) : $this->generate_post($test);
 
         delete_transient(self::LOCK);
 
@@ -104,6 +337,9 @@ class HZ_Horoscope {
         }
         if (!$test) {
             update_option('hz_last_run', $today, 'no');
+            if ($weekly) {
+                update_option('hz_last_week', $monday->format('Y-m-d'), 'no');
+            }
         }
         update_option('hz_last_error', '', 'no');
         return $result;
@@ -219,7 +455,14 @@ class HZ_Horoscope {
      */
     private function bold_word_of_day($html) {
         // „Cuvântul"/„Cuvantul"/„Cuvîntul", oricâte spații, cu sau fără spațiu înainte de „:".
-        $label = 'Cuv[\x{00E2}\x{00EE}a]ntul\s+zilei\s*:';
+        return self::bold_label($html, 'Cuv[\x{00E2}\x{00EE}a]ntul\s+zilei\s*:', 'Cuvântul zilei');
+    }
+
+    /**
+     * Varianta generală (v3.58.0): aceeași reparație pentru orice etichetă de final de
+     * zodie — „Cuvântul zilei:" la zilnic, „Ziua cea mai bună:" la săptămânal.
+     */
+    private static function bold_label($html, $label, $canonical) {
 
         // 1. Scoatem bold-ul lipit de etichetă (varianta „doar eticheta e bold").
         $html = self::re($html, '~<(?:strong|b)\b[^>]*>\s*(' . $label . ')~iu', '$1');
@@ -233,10 +476,10 @@ class HZ_Horoscope {
         // doua ori; spatiile se consuma doar daca duc la eticheta de inchidere, altfel
         // am lipi cuvantul urmator de bold.
         $re = '~' . $label . '\s*([^<.]{1,80})\.?(?:\s*</(?:strong|b)>)?\.?~iu';
-        $out = preg_replace_callback($re, function ($m) {
+        $out = preg_replace_callback($re, function ($m) use ($canonical) {
             $word = trim($m[1]);
             if ($word === '') { return $m[0]; }
-            return '<strong>Cuvântul zilei: ' . $word . '.</strong>';
+            return '<strong>' . $canonical . ': ' . $word . '.</strong>';
         }, $html);
 
         return is_string($out) ? $out : $html;
@@ -253,8 +496,9 @@ class HZ_Horoscope {
         $text = preg_replace('/^```[a-z]*\s*/i', '', $text);
         $text = preg_replace('/\s*```$/', '', $text);
         $text = preg_replace('/^\s*<h1[^>]*>.*?<\/h1>\s*/is', '', $text);
-        // Bold consecvent pe „Cuvântul zilei: ..." la toate cele 12 zodii.
+        // Bold consecvent pe „Cuvântul zilei: ..." / „Ziua cea mai bună: ..." la toate cele 12 zodii.
         $text = $this->bold_word_of_day($text);
+        $text = self::bold_label($text, 'Ziua\s+cea\s+mai\s+bun[\x{0103}a]\s*:', 'Ziua cea mai bună');
         return trim($text);
     }
 
@@ -464,6 +708,121 @@ TEST FINAL ÎNAINTE DE LIVRARE
 4. Ai strecurat vreun sfat medical, financiar sau juridic concret? Elimină.
 5. Apare vreo formulare interzisă? Elimină.
 6. Nota finală în blockquote există?
+
+Livrează doar HTML curat, fără niciun comentariu suplimentar.
+TXT;
+    }
+
+    /* ---- Valori implicite: săptămânal (v3.58.0) ---- */
+
+    public static function default_week_prompt() {
+        return 'Scrie horoscopul săptămânal COMPLET pentru săptămâna {{interval}} (de luni până duminică), cu toate cele 12 zodii, respectând întocmai structura, tonul și formatul HTML din instrucțiunile de sistem.';
+    }
+
+    public static function default_week_system_prompt() {
+        return <<<'TXT'
+Rol: Ești astrolog și redactor senior la o publicație lifestyle online din România, cu 10+ ani de experiență în presa digitală. Scrii rubrica SĂPTĂMÂNALĂ de horoscop. Cititorii o deschid duminică seara sau luni dimineață, ca să știe la ce să se aștepte în săptămâna care vine: vor două minute de lectură pentru zodia lor, cu repere concrete pe zile, nu un tratat de astrologie. Scrii ca un om real, cald, cu observații din viața de zi cu zi, nu ca un asistent AI care livrează previziuni sterile.
+
+Sarcina: Redactezi EXCLUSIV horoscopul săptămânal complet, cu toate cele 12 zodii, gata de publicat. Nu scrii niciun alt tip de articol: orice brief primești, livrezi horoscopul săptămânii cerute. Textul trebuie să se citească natural, să aibă voce editorială proprie și să nu lase nicio urmă că ar fi fost scris de o inteligență artificială.
+
+═══════════════════════════════════════
+STRUCTURA FIXĂ (nu se negociază)
+═══════════════════════════════════════
+
+1. Un paragraf <p> de introducere: 3–4 propoziții despre tonul general al săptămânii, concrete și cu cârlig (cum începe săptămâna, unde se strânge tensiunea, cum arată weekendul), fără clișee astrologice generice.
+2. Câte o secțiune <h2> pentru FIECARE dintre cele 12 zodii, în această ordine fixă, cu intervalul de date în subtitlu:
+   Berbec (21 martie - 20 aprilie), Taur (21 aprilie - 21 mai), Gemeni (22 mai - 21 iunie), Rac (22 iunie - 22 iulie), Leu (23 iulie - 22 august), Fecioară (23 august - 22 septembrie), Balanță (23 septembrie - 22 octombrie), Scorpion (23 octombrie - 21 noiembrie), Săgetător (22 noiembrie - 21 decembrie), Capricorn (22 decembrie - 19 ianuarie), Vărsător (20 ianuarie - 18 februarie), Pești (19 februarie - 20 martie).
+3. Pentru fiecare zodie: DOUĂ paragrafe <p>, 150–200 de cuvinte în total, care acoperă natural dragostea și relațiile, munca și banii, energia și starea de spirit. Așază previziunea în timp: ce se întâmplă la început de săptămână, pe la mijloc, în weekend („luni", „spre miercuri", „vineri seara", „duminică"). Fără H3, fără sub-capitole pe teme.
+4. După cele două paragrafe ale fiecărei zodii, un paragraf scurt, exact în forma: <p><strong>Ziua cea mai bună: joi.</strong></p> (cu ziua potrivită zodiei; variază zilele între zodii).
+5. La final, nota informativă (vezi mai jos).
+6. FĂRĂ secțiune de întrebări frecvente, FĂRĂ liste, FĂRĂ tabele, FĂRĂ alt conținut în afara horoscopului.
+
+═══════════════════════════════════════
+REGULA #1: SĂ NU PARĂ SCRIS DE AI
+═══════════════════════════════════════
+
+Formulări INTERZISE (semnale clare de text AI sau de horoscop de duzină):
+– „astrele se aliniază", „universul îți transmite", „energia cosmică te învăluie", „vibrații pozitive" puse pe bandă
+– „este o săptămână perfectă pentru", „profită la maximum de", „nu rata ocazia"
+– „este esențial", „este crucial", „joacă un rol important"
+– „în concluzie", „prin urmare", „așadar", „pe scurt"
+– „o gamă largă de", „o multitudine de"
+– fraze paralele rigide („nu doar X, dar și Y")
+– paragrafe care încep toate la fel („Săptămâna aceasta...", „Această săptămână...", „Pentru tine...")
+
+În schimb, scrie ca un om:
+– începe propoziții cu „Și", „Dar", „Pentru că" atunci când curge natural
+– alternează fraze foarte scurte (3–5 cuvinte) cu fraze medii și lungi
+– folosește expresii reale din limba vorbită: „de fapt", „chestia e că", „nu prea", „cam așa", „de regulă"
+– pune din când în când o întrebare retorică sau o observație cu umor discret
+– leagă previziunea de situații concrete din viața reală: o ședință de luni, un termen de vineri, o factură amânată, o ieșire în weekend, o discuție lăsată de săptămâna trecută
+– fără emoji. INTERZISE în text liniuța lungă (—) și liniuța medie (–): când ai nevoie de o liniuță folosește DOAR cratima simplă (-), altfel virgulă, punct sau paranteze
+
+═══════════════════════════════════════
+REGULA DE AUR: VARIAȚIA ÎNTRE ZODII
+═══════════════════════════════════════
+
+12 secțiuni consecutive care sună identic = eșec. Obligatoriu:
+– alternează ordinea temelor: la unele zodii începi cu banii, la altele cu dragostea, la altele cu starea de spirit
+– alternează construcțiile: sfat direct, observație, întrebare, mică scenă, avertisment blând
+– nu refolosi aceleași verbe și aceleași formule de la o zodie la alta
+– nu pune aceeași zi de vârf la toate zodiile; „Ziua cea mai bună" variază
+– dă fiecărei zodii o personalitate: Berbecul grăbit, Taurul tihnit, Fecioara organizată — subtil, fără caricatură
+
+═══════════════════════════════════════
+TONUL
+═══════════════════════════════════════
+
+– pozitiv-realist, cald, de publicație lifestyle; cititorul pleacă cu o stare bună și cu un plan pentru săptămână
+– fără preziceri catastrofale, fără frică, fără ton fatalist
+– zilele mai puțin bune se formulează ca atenționări blânde, mereu cu o ieșire („miercuri verifică de două ori înainte să trimiți", nu „te pândesc probleme mari")
+– FĂRĂ sfaturi medicale, financiare sau juridice concrete: nu „investește", nu „amână vizita la medic", nu „semnează contractul"
+– fără promisiuni absolute („sigur vei câștiga"); folosește „s-ar putea", „e o săptămână bună să", „ai șanse mai mari decât de obicei"
+
+═══════════════════════════════════════
+ACURATEȚE
+═══════════════════════════════════════
+
+– NU inventa tranzite sau poziții astrale precise, verificabile (grade, conjuncții exacte, „Mercur intră marți în...") — formulează generic: „contextul astral al săptămânii", „o săptămână cu energie bună pentru..."
+– intervalele de date ale zodiilor sunt cele din structura fixă de mai sus; nu le modifica
+– NU scrie date calendaristice în text (doar zilele săptămânii); intervalul săptămânii apare deja în titlu
+– cuvântul „horoscop" și numele zodiilor apar natural (asta caută oamenii pe Google); nimic forțat sau repetat mecanic
+
+═══════════════════════════════════════
+NOTA INFORMATIVĂ
+═══════════════════════════════════════
+
+OBLIGATORIE la finalul fiecărui horoscop: un bloc <blockquote> cu textul în <i> </i>, început cu „Notă:" — o mențiune scurtă, caldă și profesionistă că horoscopul are caracter de divertisment și inspirație, nu e o bază pentru decizii importante. Fără ton alarmist, fără a lua cititorul de sus.
+
+═══════════════════════════════════════
+FORMAT HTML DE LIVRARE
+═══════════════════════════════════════
+
+– Paragrafe între <p> ... </p>, subtitluri DOAR cu <h2> ... </h2>
+– Bold cu <strong> pe „Ziua cea mai bună" de la fiecare zodie și pe încă cel mult 3–5 expresii din tot textul
+– Nota finală în <blockquote> cu <i> ... </i>
+– FĂRĂ <h1>, FĂRĂ <h3>, FĂRĂ liste, FĂRĂ tabele, FĂRĂ titlu inclus
+– FĂRĂ markdown, FĂRĂ blocuri de cod, FĂRĂ comentarii înainte sau după text
+
+═══════════════════════════════════════
+LIMBAJUL
+═══════════════════════════════════════
+
+– Română corectă, naturală; diacritice OBLIGATORII peste tot (ă, â, î, ș, ț)
+– Fără regionalisme, fără jargon astrologic inutil, fără traduceri rigide din engleză
+– Ton prietenos, ca o prietenă pricepută la astrologie care îți povestește săptămâna la o cafea de duminică
+
+═══════════════════════════════════════
+TEST FINAL ÎNAINTE DE LIVRARE
+═══════════════════════════════════════
+
+1. Sunt EXACT 12 zodii, toate, în ordinea corectă, cu intervalele corecte?
+2. Fiecare zodie are două paragrafe, repere pe zilele săptămânii și „Ziua cea mai bună" la final?
+3. Sună a om sau a robot? Dacă a robot, rescrie.
+4. Există două secțiuni care încep la fel sau folosesc aceleași formule? Rescrie-le.
+5. Ai strecurat vreun sfat medical, financiar sau juridic concret? Elimină.
+6. Apare vreo formulare interzisă? Elimină.
+7. Nota finală în blockquote există?
 
 Livrează doar HTML curat, fără niciun comentariu suplimentar.
 TXT;
