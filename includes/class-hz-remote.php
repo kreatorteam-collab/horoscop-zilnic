@@ -27,7 +27,8 @@ if (!defined('ABSPATH')) { exit; }
  *   hz/v1/import   -> v3.57.0: creează pe site un articol preluat de pe alt site din flotă
  *   hz/v1/retitle  -> v3.59.0: articole duplicate — `check` (se pot rescrie? regula de aur) și
  *                     `restore` (titlul + textul de dinainte). Rescrierea în sine vine prin
- *                     enqueue, cu `rewrite_id` pe articol (vezi HZ_Retitle)
+ *                     enqueue, cu `rewrite_id` pe articol (vezi HZ_Retitle); v3.60.0: `title`
+ *                     = doar titlul nou, textul rămâne, fără să schimbe data „modificat”
  */
 class HZ_Remote {
 
@@ -687,7 +688,8 @@ class HZ_Remote {
     }
 
     /**
-     * v3.59.0: articole duplicate în flotă. Body: { action: check|restore, ids: [...] }.
+     * v3.59.0: articole duplicate în flotă. Body: { action: check|restore, ids: [...] }
+     * sau (v3.60.0) { action: title, items: [{id, title}] } = doar titlul nou.
      * check = se poate rescrie fiecare (regula de aur: fără linkuri externe / advertoriale),
      * restore = pune la loc titlul și textul de dinainte (max. 50 pe apel).
      */
@@ -705,6 +707,11 @@ class HZ_Remote {
                 $out[] = HZ_Retitle::restore($id);
             }
             return array('ok' => true, 'restored' => $out);
+        }
+        if ($action === 'title') {
+            // v3.60.0: doar titlul nou (textul rămâne), [{id, title}], max. 200 pe apel.
+            $items = isset($data['items']) && is_array($data['items']) ? $data['items'] : array();
+            return array('ok' => true, 'titled' => HZ_Retitle::apply_titles($items));
         }
         return array('ok' => true, 'items' => HZ_Retitle::check($ids));
     }
