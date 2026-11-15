@@ -75,6 +75,11 @@ class HZ_Rewrite {
         if (!class_exists('CW_API') || !CW_API::has_key()) {
             return array('id' => $post_id, 'error' => 'fara_cheie_ai');
         }
+        // REGULA DE AUR (v3.59.1, „nici o regulă nu trece peste asta”): un articol cu adresă spre alt
+        // domeniu nu se rescrie — inclusiv cele cu citări (citarea e tot un link spre alt site).
+        if (class_exists('HZ_Retitle') && HZ_Retitle::golden($post_id) !== '') {
+            return array('id' => $post_id, 'error' => 'regula_de_aur', 'message' => 'Neatins: are link spre alt site / e advertorial');
+        }
 
         $original = (string) $post->post_content;
         $cit_before = preg_match_all('#\]\(https?://#i', $original);

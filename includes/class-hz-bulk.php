@@ -671,6 +671,8 @@ class HZ_Bulk {
             if ($item['s'] !== 'done' || empty($item['post_id'])) { continue; }
             $pid = (int) $item['post_id'];
             if (!get_post($pid) || has_post_thumbnail($pid)) { continue; }
+            // REGULA DE AUR (v3.59.1): articolul cu link spre alt site / advertorialul nu se atinge.
+            if (class_exists('HZ_Retitle') && HZ_Retitle::golden($pid) !== '') { continue; }
 
             if ($filled >= $batch) { $left++; continue; }
 
@@ -1623,6 +1625,8 @@ class HZ_Bulk {
             if (($item['s'] ?? '') !== 'done' || empty($item['post_id'])) { continue; }
             $pid = (int) $item['post_id'];
             if (!get_post($pid)) { continue; }
+            // REGULA DE AUR (v3.59.1): articolul cu link spre alt site / advertorialul nu se atinge.
+            if (class_exists('HZ_Retitle') && HZ_Retitle::golden($pid) !== '') { $out['skipped_golden'] = (int) ($out['skipped_golden'] ?? 0) + 1; continue; }
 
             $old = (int) get_post_thumbnail_id($pid);
             // „Refa pozele" = doar unde EXISTA deja o poza; cele fara raman neatinse.
