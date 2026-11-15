@@ -25,6 +25,9 @@ if (!defined('ABSPATH')) { exit; }
  *                     astepti auto-update-ul WP, care verifica doar de 2 ori pe zi)
  *   hz/v1/export   -> v3.57.0: articolele noi ale site-ului, pentru „Preluare articole"
  *   hz/v1/import   -> v3.57.0: creează pe site un articol preluat de pe alt site din flotă
+ *   hz/v1/retitle  -> v3.59.0: articole duplicate — `check` (se pot rescrie? regula de aur) și
+ *                     `restore` (titlul + textul de dinainte). Rescrierea în sine vine prin
+ *                     enqueue, cu `rewrite_id` pe articol (vezi HZ_Retitle)
  */
 class HZ_Remote {
 
@@ -36,7 +39,7 @@ class HZ_Remote {
     }
 
     public function register() {
-        $routes = array('info', 'enqueue', 'status', 'control', 'settings', 'rewrite', 'golinks', 'trash', 'costs', 'reimage', 'upgrade', 'category', 'media', 'export', 'import');
+        $routes = array('info', 'enqueue', 'status', 'control', 'settings', 'rewrite', 'golinks', 'trash', 'costs', 'reimage', 'upgrade', 'category', 'media', 'export', 'import', 'retitle');
         foreach ($routes as $route) {
             register_rest_route('hz/v1', '/' . $route, array(
                 'methods'             => 'POST',
@@ -338,6 +341,8 @@ class HZ_Remote {
                 // v3.55.0: token-ul pozei încărcate înainte prin hz/v1/media.
                 'imgfile'  => isset($it['img_file']) && class_exists('HZ_Uploads') && HZ_Uploads::valid_token($it['img_file'])
                     ? (string) $it['img_file'] : '',
+                // v3.59.0: rescrie articolul existent cu acest ID (titlu nou, aceeași adresă).
+                'rewrite_id' => isset($it['rewrite_id']) ? (int) $it['rewrite_id'] : 0,
             );
         }
 
@@ -679,6 +684,29 @@ class HZ_Remote {
                 'people_ethnicity' => HZ_Magnific::ethnicity(),
             ),
         );
+    }
+
+    /**
+     * v3.59.0: articole duplicate în flotă. Body: { action: check|restore, ids: [...] }.
+     * check = se poate rescrie fiecare (regula de aur: fără linkuri externe / advertoriale),
+     * restore = pune la loc titlul și textul de dinainte (max. 50 pe apel).
+     */
+    public function handle_retitle(WP_REST_Request $req) {
+        $data = $this->auth($req);
+        if ($data instanceof WP_REST_Response) { return $data; }
+        if (!class_exists('HZ_Retitle')) {
+            return new WP_REST_Response(array('error' => 'no_module'), 400);
+        }
+        $ids = isset($data['ids']) && is_array($data['ids']) ? array_map('intval', $data['ids']) : array();
+        $action = isset($data['action']) ? sanitize_key((string) $data['action']) : 'check';
+        if ($action === 'restore') {
+            $out = array();
+            foreach (array_slice(array_values(array_unique(array_filter($ids))), 0, 50) as $id) {
+                $out[] = HZ_Retitle::restore($id);
+            }
+            return array('ok' => true, 'restored' => $out);
+        }
+        return array('ok' => true, 'items' => HZ_Retitle::check($ids));
     }
 
     /**

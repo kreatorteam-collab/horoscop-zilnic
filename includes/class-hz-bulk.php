@@ -338,6 +338,16 @@ class HZ_Bulk {
                 'rd'      => $rd,
                 'lnk'     => array('total' => count($links), 'done' => 0, 'forced' => 0),
             );
+            // v3.59.0: rescrierea unui articol EXISTENT (duplicate în flotă, vezi HZ_Retitle):
+            // același ID / adresă / poză, titlu și text noi. Fără poze noi.
+            $rw = isset($row['rewrite_id']) ? (int) $row['rewrite_id'] : 0;
+            if ($rw > 0 && class_exists('HZ_Retitle')) {
+                $last = count($q) - 1;
+                $q[$last]['rw']   = $rw;
+                $q[$last]['img']  = 0;
+                $q[$last]['imgf'] = '';
+                $q[$last]['rd']   = 0;
+            }
             $added++;
         }
 
@@ -979,6 +989,20 @@ class HZ_Bulk {
         $model = CW_API::resolve_model((string) $item['model']);
         $cost  = 0.0;
 
+        // v3.59.0: rescriere — regula de aur verificată ÎNAINTE de a plăti textul.
+        $rw = (isset($item['rw']) && class_exists('HZ_Retitle')) ? (int) $item['rw'] : 0;
+        if ($rw > 0) {
+            $hosts = array();
+            $why = HZ_Retitle::reason($rw, $hosts);
+            if ($why !== '') {
+                $item['s']       = 'done';
+                $item['post_id'] = $rw;
+                $item['err']     = '';
+                $item['note']    = HZ_Retitle::reason_label($why, $hosts);
+                return $item;
+            }
+        }
+
         // 1) Conținutul: același șablon și system prompt editorial ca butonul
         // „Articol nou" din editor — stil deja pus la punct per site.
         // v3.10.0: dacă o rulare anterioară a scris textul dar s-a oprit fiindcă nu mai
@@ -1008,6 +1032,16 @@ class HZ_Bulk {
                 && class_exists('HZ_Review') && !empty($item['prod']);
 
             $brief = $title;
+            if ($rw > 0) {
+                // Subiectul vine din articolul existent (adresa și categoria lui rămân): titlul
+                // vechi e doar context, textul se scrie de la zero.
+                $old = get_post($rw);
+                if ($old) {
+                    $brief .= "\n\nArticolul înlocuiește pe site un text mai vechi, pe același subiect (titlul vechi: „"
+                        . wp_strip_all_tags($old->post_title) . "”). Scrie-l de la zero, original, pe titlul nou de mai sus; "
+                        . "NU folosi titlul vechi și nu reproduce formulări din alte articole.";
+                }
+            }
             if (trim((string) $item['extra']) !== '') {
                 $brief .= "\n\nInstrucțiuni suplimentare pentru acest lot de articole:\n" . trim((string) $item['extra']);
             }
@@ -1165,6 +1199,31 @@ class HZ_Bulk {
         }
 
         // 3) Articolul.
+        // v3.59.0: rescriere — titlul și textul nou intră pe articolul existent.
+        if ($rw > 0) {
+            $other = $this->existing_post_id($title);
+            if ($other && (int) $other !== $rw) {
+                $item['s']    = 'error';
+                $item['err']  = 'Există deja pe site un alt articol cu titlul nou (#' . (int) $other . ').';
+                $item['cost'] = $cost;
+                return $item;
+            }
+            $ok = HZ_Retitle::apply($rw, $title, $content);
+            $item['cost'] = $cost;
+            $item['post_id'] = $rw;
+            if (is_wp_error($ok)) {
+                // Între timp a apărut un motiv să nu-l atingem (link extern, advertorial): nu e eroare.
+                $item['s']    = strpos((string) $ok->get_error_code(), 'hz_rt_') === 0 ? 'done' : 'error';
+                $item['err']  = $item['s'] === 'error' ? $ok->get_error_message() : '';
+                $item['note'] = $item['s'] === 'done' ? $ok->get_error_message() : '';
+                return $item;
+            }
+            $item['s']    = 'done';
+            $item['err']  = '';
+            $item['note'] = 'Rescris pe articolul existent (titlu nou)' . ($link_note !== '' ? ' · ' . $link_note : '')
+                . (!empty($result['incomplete']) ? ' · ATENȚIE: text tăiat la limita de tokeni' : '');
+            return $item;
+        }
         $status = in_array($item['st'], array('publish', 'draft', 'pending'), true) ? $item['st'] : 'draft';
         $postarr = array(
             'post_title'    => wp_strip_all_tags($title),

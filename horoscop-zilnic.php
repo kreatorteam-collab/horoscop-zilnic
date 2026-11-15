@@ -37,6 +37,7 @@ require_once HZ_PATH . 'includes/class-hz-golinks.php';
 require_once HZ_PATH . 'includes/class-hz-uploads.php';
 require_once HZ_PATH . 'includes/class-hz-bulk.php';
 require_once HZ_PATH . 'includes/class-hz-rewrite.php';
+require_once HZ_PATH . 'includes/class-hz-retitle.php'; // v3.59.0: rescrierea articolelor duplicate (titlu nou)
 require_once HZ_PATH . 'includes/class-hz-news.php';
 require_once HZ_PATH . 'includes/class-hz-syndicate.php';
 require_once HZ_PATH . 'includes/class-hz-remote.php';
