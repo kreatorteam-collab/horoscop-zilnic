@@ -27,6 +27,8 @@ class HZ_Retitle {
     const META_BACKUP = '_hz_rt_backup';
     const META_AT     = '_hz_rt_at';
     const PROTECTED_RE = '/advertorial|sponsoriz|sponsored|promovat|recomandari|comunicat|publicitar|parteneri/i';
+    /** Extensiile pe care un domeniu scris ca text (fără www / protocol) contează ca adresă de site. */
+    const TEXT_TLDS = 'ro|com|net|org|eu|info|biz|shop|store|online|site|md|bg|hu|de|it|fr|es|uk|io|co';
     const SEO_KEYS = array('_seopress_titles_title', '_seopress_titles_desc', '_seopress_social_fb_title', '_seopress_social_twitter_title');
 
     private static function host($url) {
@@ -53,6 +55,13 @@ class HZ_Retitle {
         if (preg_match_all('~\bwww\.([a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,})~i', $content, $m)) {
             foreach ($m[1] as $h) { $hosts[] = $h; }
         }
+        // v3.60.1: domeniu scris ca text, fără www („comandă de pe firma.ro”, „office@firma.ro”) —
+        // în advertorialele vechi linkul e uneori scos și rămâne doar numele site-ului. Doar pe
+        // extensiile uzuale, ca să nu prindem „3.5” sau „Node.js”.
+        $text = wp_strip_all_tags(str_replace('>', '> ', $content));
+        if (preg_match_all('~(?<![\w.@-])(?:[a-z0-9-]+@)?((?:[a-z0-9-]+\.)+(?:' . self::TEXT_TLDS . '))(?![\w-])~iu', $text, $m)) {
+            foreach ($m[1] as $h) { $hosts[] = $h; }
+        }
         $out = array();
         foreach ($hosts as $h) {
             $h = preg_replace('~^www\.~', '', strtolower(rtrim($h, '.')));
@@ -71,6 +80,21 @@ class HZ_Retitle {
     }
 
     /**
+     * Advertorial după categorie SAU după etichetă (v3.60.1: un articol etichetat „advertorial” /
+     * „sponsorizat” fără categoria de advertoriale e tot advertorial).
+     */
+    public static function is_sponsored($post_id) {
+        foreach (array('category', 'post_tag') as $tax) {
+            $terms = get_the_terms((int) $post_id, $tax);
+            if (!is_array($terms)) { continue; }
+            foreach ($terms as $t) {
+                if (preg_match(self::PROTECTED_RE, (string) $t->slug) || preg_match(self::PROTECTED_RE, (string) $t->name)) { return true; }
+            }
+        }
+        return false;
+    }
+
+    /**
      * REGULA DE AUR, indiferent de starea articolului: 'sponsored' (categorie de advertoriale),
      * 'links' (adresă spre alt domeniu în conținut / rezumat) sau '' (se poate atinge).
      */
@@ -78,9 +102,7 @@ class HZ_Retitle {
         $hosts = array();
         $p = get_post((int) $post_id);
         if (!$p) { return ''; }
-        foreach (wp_get_post_categories($p->ID, array('fields' => 'all')) as $t) {
-            if (preg_match(self::PROTECTED_RE, (string) $t->slug) || preg_match(self::PROTECTED_RE, (string) $t->name)) { return 'sponsored'; }
-        }
+        if (self::is_sponsored($p->ID)) { return 'sponsored'; }
         $hosts = self::external_hosts($p->post_content . ' ' . $p->post_excerpt);
         return $hosts ? 'links' : '';
     }
@@ -95,9 +117,7 @@ class HZ_Retitle {
         if (!$p || $p->post_type !== 'post') { return 'missing'; }
         if ($p->post_status !== 'publish') { return 'status'; }
         if (get_post_meta($p->ID, self::META_BACKUP, true) !== '') { return 'done'; }
-        foreach (wp_get_post_categories($p->ID, array('fields' => 'all')) as $t) {
-            if (preg_match(self::PROTECTED_RE, (string) $t->slug) || preg_match(self::PROTECTED_RE, (string) $t->name)) { return 'sponsored'; }
-        }
+        if (self::is_sponsored($p->ID)) { return 'sponsored'; }
         $hosts = self::external_hosts($p->post_content . ' ' . $p->post_excerpt);
         if (!empty($hosts)) { return 'links'; }
         return '';
