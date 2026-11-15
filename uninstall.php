@@ -5,6 +5,9 @@ $options = array(
     'hz_enabled', 'hz_hour', 'hz_status', 'hz_model', 'hz_category', 'hz_category_id', 'hz_author',
     'hz_source_url', 'hz_image', 'hz_title', 'hz_prompt', 'hz_system_prompt',
     'hz_auto_update', 'hz_last_run', 'hz_last_error', 'hz_db_version', 'hz_cw_removed',
+    // Horoscop săptămânal (v3.58.0):
+    'hz_frequency', 'hz_weekday', 'hz_week_title', 'hz_week_title_variant', 'hz_week_prompt',
+    'hz_week_system_prompt', 'hz_week_source_url', 'hz_last_week', 'hz_weekly_forced',
     // Modul Vreme (v3.0.0) — opțiunile hzw_*:
     'hzw_enabled', 'hzw_hour', 'hzw_status', 'hzw_model', 'hzw_category', 'hzw_category_id',
     'hzw_author', 'hzw_source_url', 'hzw_image', 'hzw_cite_source', 'hzw_cache_hours', 'hzw_title',
