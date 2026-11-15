@@ -31,16 +31,38 @@ class HZ_Retitle {
         return preg_replace('~^www\.~', '', $h);
     }
 
-    /** Domeniile externe din conținut (fără site-ul însuși). */
+    /**
+     * Domeniile externe din conținut (fără site-ul însuși) — REGULA DE AUR, strict (v3.59.1):
+     * orice adresă spre alt domeniu blochează articolul, nu doar <a href="…">: link fără
+     * ghilimele, poză / iframe / embed de pe alt site, adresă scrisă ca text („www.firma.ro”,
+     * „https://…”). Un articol cu link spre alt site poate fi advertorial: nu se atinge.
+     */
     public static function external_hosts($content) {
-        if (stripos((string) $content, '<a') === false) { return array(); }
-        if (!preg_match_all('~<a\s[^>]*href\s*=\s*["\']\s*(?:https?:)?//([^/"\'\s?#:]+)~i', (string) $content, $m)) { return array(); }
+        $content = (string) $content;
+        if ($content === '') { return array(); }
         $own = self::host(home_url('/'));
+        $hosts = array();
+        // Orice URL absolut sau relativ la protocol: href / src / data-* / text (cu sau fără ghilimele).
+        if (preg_match_all('~(?:https?:)?//([a-z0-9.-]+\.[a-z]{2,})~i', $content, $m)) {
+            foreach ($m[1] as $h) { $hosts[] = $h; }
+        }
+        // Domenii scrise ca text, fără protocol: „www.firma.ro”.
+        if (preg_match_all('~\bwww\.([a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,})~i', $content, $m)) {
+            foreach ($m[1] as $h) { $hosts[] = $h; }
+        }
         $out = array();
-        foreach ($m[1] as $h) {
-            $h = preg_replace('~^www\.~', '', strtolower($h));
+        foreach ($hosts as $h) {
+            $h = preg_replace('~^www\.~', '', strtolower(rtrim($h, '.')));
             if ($h === '' || $h === $own) { continue; }
             $out[$h] = true;
+        }
+        // rel="sponsored" fără domeniu prins mai sus: tot advertorial.
+        if (empty($out) && preg_match('~rel\s*=\s*["\']?[^"\'>]*\bsponsored\b~i', $content)) {
+            $out['rel=sponsored'] = true;
+        }
+        // Redirectorul propriu de afiliere (/go/{slug}, HZ_GoLinks) = link spre alt site, mascat.
+        if (preg_match('~href\s*=\s*["\']?(?:https?://[^/"\'\s>]+)?/go/[a-z0-9_-]+~i', $content)) {
+            $out['/go/ (afiliere)'] = true;
         }
         return array_keys($out);
     }
@@ -58,7 +80,7 @@ class HZ_Retitle {
         foreach (wp_get_post_categories($p->ID, array('fields' => 'all')) as $t) {
             if (preg_match(self::PROTECTED_RE, (string) $t->slug) || preg_match(self::PROTECTED_RE, (string) $t->name)) { return 'sponsored'; }
         }
-        $hosts = self::external_hosts($p->post_content);
+        $hosts = self::external_hosts($p->post_content . ' ' . $p->post_excerpt);
         if (!empty($hosts)) { return 'links'; }
         return '';
     }
