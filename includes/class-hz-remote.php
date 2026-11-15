@@ -853,6 +853,7 @@ class HZ_Remote {
         $hard = !empty($data['hard']);
         $done = array();
         $not_found = array();
+        $kept = array();
 
         // Potrivire TOLERANTĂ, nu egalitate exactă pe post_title: între titlul comandat
         // din panou și cel salvat de WordPress se pot strecura diferențe de spații, de
@@ -890,6 +891,10 @@ class HZ_Remote {
                 continue;
             }
             foreach ($index[$key] as $id) {
+                // REGULA DE AUR (v3.59.1): un articol cu adresă spre alt domeniu sau din categoriile de
+                // advertoriale nu se șterge, nici când lotul care l-a creat e anulat / refăcut — poate fi
+                // advertorial. Rămâne pe site și apare în raport („protejate”).
+                if (class_exists('HZ_Retitle') && HZ_Retitle::golden($id) !== '') { $kept[] = mb_substr((string) $t, 0, 60); continue; }
                 $ok = $hard ? wp_delete_post($id, true) : wp_trash_post($id);
                 if ($ok) { $done[] = (int) $id; }
             }
@@ -898,6 +903,9 @@ class HZ_Remote {
         return array(
             'ok'        => true,
             'trashed'   => count($done),
+            // Neatinse: aveau linkuri spre alte site-uri / erau advertoriale (regula de aur).
+            'protected' => count($kept),
+            'protected_titles' => array_slice($kept, 0, 5),
             // Erau deja în coș: nu e o eroare, e treaba deja făcută.
             'already'   => $already,
             'missing'   => count($not_found),

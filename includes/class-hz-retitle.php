@@ -23,7 +23,7 @@ class HZ_Retitle {
 
     const META_BACKUP = '_hz_rt_backup';
     const META_AT     = '_hz_rt_at';
-    const PROTECTED_RE = '/advertorial|sponsoriz|sponsored|promovat|comunicat|publicitar|parteneri/i';
+    const PROTECTED_RE = '/advertorial|sponsoriz|sponsored|promovat|recomandari|comunicat|publicitar|parteneri/i';
     const SEO_KEYS = array('_seopress_titles_title', '_seopress_titles_desc', '_seopress_social_fb_title', '_seopress_social_twitter_title');
 
     private static function host($url) {
@@ -65,6 +65,21 @@ class HZ_Retitle {
             $out['/go/ (afiliere)'] = true;
         }
         return array_keys($out);
+    }
+
+    /**
+     * REGULA DE AUR, indiferent de starea articolului: 'sponsored' (categorie de advertoriale),
+     * 'links' (adresă spre alt domeniu în conținut / rezumat) sau '' (se poate atinge).
+     */
+    public static function golden($post_id, &$hosts = array()) {
+        $hosts = array();
+        $p = get_post((int) $post_id);
+        if (!$p) { return ''; }
+        foreach (wp_get_post_categories($p->ID, array('fields' => 'all')) as $t) {
+            if (preg_match(self::PROTECTED_RE, (string) $t->slug) || preg_match(self::PROTECTED_RE, (string) $t->name)) { return 'sponsored'; }
+        }
+        $hosts = self::external_hosts($p->post_content . ' ' . $p->post_excerpt);
+        return $hosts ? 'links' : '';
     }
 
     /**

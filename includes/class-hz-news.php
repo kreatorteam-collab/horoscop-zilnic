@@ -1026,6 +1026,8 @@ TXT;
         $done = 0;
         foreach ($queue as $post_id => $tries) {
             if ($done >= 2) { break; }
+            // REGULA DE AUR (v3.59.1): știrea cu link spre alt site (ex. sursa) nu se mai atinge.
+            if (class_exists('HZ_Retitle') && HZ_Retitle::golden((int) $post_id) !== '') { unset($queue[$post_id]); continue; }
             $done++;
             $thumb = (int) get_post_thumbnail_id($post_id);
             $file  = $thumb > 0 ? get_attached_file($thumb) : '';
