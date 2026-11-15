@@ -18,6 +18,9 @@ if (!defined('ABSPATH')) { exit; }
  *
  * Titlul, conținutul și meta SEO de dinainte se păstrează în `_hz_rt_backup`, deci
  * `restore` pune articolul exact cum era.
+ *
+ * v3.60.0 — `apply_title`: DOAR titlul nou, pentru copiile al căror text e deja diferit de
+ * original (titlu identic, text scris separat). Fără wp_update_post: data „modificat” rămâne.
  */
 class HZ_Retitle {
 
@@ -162,8 +165,70 @@ class HZ_Retitle {
         return true;
     }
 
+    /** Meta SEO care conțin titlul (le scoatem la schimbarea titlului, ca SEOPress să folosească titlul nou). */
+    const SEO_TITLE_KEYS = array('_seopress_titles_title', '_seopress_social_fb_title', '_seopress_social_twitter_title');
+
+    /**
+     * v3.60.0 — DOAR TITLUL NOU, textul rămâne (copii cu titlu identic, dar text deja diferit de
+     * original — ex. fișele de plante scrise separat pe fiecare site din aceeași listă de titluri).
+     * Regula de aur ca la rescriere (`reason`). Titlul se scrie direct în DB, deci data „modificat”
+     * NU se schimbă (textul e același; altfel articolul ar afișa „Actualizat la” fără motiv).
+     * Adresa (slug) rămâne. Titlul vechi + meta SEO de titlu intră în `_hz_rt_backup` (mode = title),
+     * deci `restore` îl pune la loc.
+     * @return true|WP_Error
+     */
+    public static function apply_title($post_id, $title) {
+        global $wpdb;
+        $title = trim(preg_replace('/\s+/u', ' ', wp_strip_all_tags((string) $title)));
+        if ($title === '' || mb_strlen($title) > 200) { return new WP_Error('hz_rt_title', 'Titlu gol sau prea lung'); }
+        $hosts = array();
+        $why = self::reason($post_id, $hosts);
+        if ($why !== '') { return new WP_Error('hz_rt_' . $why, self::reason_label($why, $hosts)); }
+        $p = get_post((int) $post_id);
+        if (wp_strip_all_tags($p->post_title) === $title) { return new WP_Error('hz_rt_same', 'Titlul nou e același cu cel vechi'); }
+
+        $seo = array();
+        foreach (self::SEO_TITLE_KEYS as $k) {
+            $v = get_post_meta($p->ID, $k, true);
+            if ($v !== '' && $v !== false) { $seo[$k] = $v; }
+        }
+        $backup = array('mode' => 'title', 't' => $p->post_title, 'c' => '', 'e' => $p->post_excerpt, 'seo' => $seo, 'at' => current_time('mysql'));
+        update_post_meta($p->ID, self::META_BACKUP, wp_slash(wp_json_encode($backup)));
+
+        $ok = $wpdb->update($wpdb->posts, array('post_title' => $title), array('ID' => $p->ID), array('%s'), array('%d'));
+        if ($ok === false) {
+            delete_post_meta($p->ID, self::META_BACKUP);
+            return new WP_Error('hz_rt_db', 'Nu am putut scrie titlul: ' . $wpdb->last_error);
+        }
+        foreach (array_keys($seo) as $k) { delete_post_meta($p->ID, $k); }
+        update_post_meta($p->ID, self::META_AT, current_time('Y-m-d'));
+        self::after_direct_write($p->ID);
+        return true;
+    }
+
+    /** După o scriere directă în DB: cache-ul WordPress și pagina din LiteSpeed se golesc. */
+    private static function after_direct_write($post_id) {
+        clean_post_cache($post_id);
+        if (has_action('litespeed_purge_post')) { do_action('litespeed_purge_post', $post_id); }
+    }
+
+    /** Titluri noi pe mai multe articole: [{id, title}] -> [{id, ok, error}] (max. 200 pe apel). */
+    public static function apply_titles(array $items) {
+        $out = array();
+        foreach (array_slice($items, 0, 200) as $it) {
+            $id = isset($it['id']) ? (int) $it['id'] : 0;
+            if ($id <= 0) { continue; }
+            $r = self::apply_title($id, isset($it['title']) ? (string) $it['title'] : '');
+            $out[] = is_wp_error($r)
+                ? array('id' => $id, 'ok' => false, 'code' => str_replace('hz_rt_', '', $r->get_error_code()), 'error' => $r->get_error_message())
+                : array('id' => $id, 'ok' => true);
+        }
+        return $out;
+    }
+
     /** Pune la loc titlul, textul și meta SEO de dinainte. */
     public static function restore($post_id) {
+        global $wpdb;
         $post_id = (int) $post_id;
         $raw = get_post_meta($post_id, self::META_BACKUP, true);
         $b = is_string($raw) && $raw !== '' ? json_decode($raw, true) : null;
@@ -172,6 +237,19 @@ class HZ_Retitle {
         }
         $p = get_post($post_id);
         if (!$p) { return array('id' => $post_id, 'ok' => false, 'error' => 'articol inexistent'); }
+        if (($b['mode'] ?? '') === 'title') {
+            // v3.60.0: doar titlul fusese schimbat (direct în DB) -> doar titlul revine, tot fără „modificat”.
+            if ($wpdb->update($wpdb->posts, array('post_title' => $b['t']), array('ID' => $post_id), array('%s'), array('%d')) === false) {
+                return array('id' => $post_id, 'ok' => false, 'error' => 'Nu am putut scrie titlul: ' . $wpdb->last_error);
+            }
+            foreach ((array) ($b['seo'] ?? array()) as $k => $v) {
+                if (in_array($k, self::SEO_TITLE_KEYS, true)) { update_post_meta($post_id, $k, wp_slash($v)); }
+            }
+            delete_post_meta($post_id, self::META_BACKUP);
+            delete_post_meta($post_id, self::META_AT);
+            self::after_direct_write($post_id);
+            return array('id' => $post_id, 'ok' => true, 'title' => $b['t'], 'mode' => 'title');
+        }
         $r = wp_update_post(wp_slash(array(
             'ID'           => $post_id,
             'post_title'   => $b['t'],
