@@ -572,10 +572,39 @@ class CW_API {
             ? self::generate_openai($model_id, $user_prompt, $max_tokens)
             : self::generate_anthropic($model_id, $user_prompt, $max_tokens);
 
+        // v3.58.1: serverul GPT configurat (gateway, ex. api.ns.fm) a căzut sau a expirat
+        // (524 = Cloudflare a tăiat cererea după 100 s; orice 5xx / eroare de conexiune).
+        // Dacă site-ul are și cheie Anthropic, refacem O DATĂ cererea cu Claude, ca
+        // horoscopul / vremea / articolele să nu se piardă din cauza gateway-ului.
+        // Erorile „normale" (cheie greșită, limită, 4xx) rămân erori.
+        if ($provider === 'openai' && is_wp_error($result) && is_string($user_prompt)
+            && self::openai_base() !== self::OPENAI_BASE
+            && self::has_provider_key('anthropic')
+            && self::is_transient_error($result)) {
+            $fallback = CW_Models::provider_default('anthropic');
+            $retry    = self::generate_anthropic($fallback, $user_prompt, $max_tokens);
+            if (!is_wp_error($retry)) {
+                self::clear_credit_alert('anthropic');
+                $retry['fallback'] = array('from' => $model_id, 'to' => $fallback, 'error' => $result->get_error_message());
+                return $retry;
+            }
+            return new WP_Error('cw_api', $result->get_error_message() . ' | Claude (' . $fallback . '): ' . $retry->get_error_message());
+        }
+
         if (!is_wp_error($result)) {
             self::clear_credit_alert($provider); // generare reușită -> alerta se stinge
         }
         return $result;
+    }
+
+    /** Eroare de server / conexiune (5xx, 52x, timeout), nu una din cererea noastră. */
+    private static function is_transient_error(WP_Error $err) {
+        if ($err->get_error_code() === 'cw_http') { return true; }
+        $data = $err->get_error_data();
+        $code = is_array($data) && isset($data['status']) ? (int) $data['status'] : 0;
+        if ($code >= 500) { return true; }
+        // Apelurile fără cod atașat (ex. Responses API) au codul doar în mesaj: „Eroare API (524): …".
+        return $code === 0 && (bool) preg_match('/\(5\d\d\)/', $err->get_error_message());
     }
 
     private static function generate_anthropic($model_id, $user_prompt, $max_tokens = null) {
@@ -703,7 +732,7 @@ class CW_API {
                     ? $body['error']['message']
                     : __('Răspuns invalid de la API.', 'claude-writer');
                 self::maybe_credit_alert('openai', $msg);
-                return new WP_Error('cw_api', sprintf(__('Eroare API (%d): %s', 'claude-writer'), $code, $msg));
+                return new WP_Error('cw_api', sprintf(__('Eroare API (%d): %s', 'claude-writer'), $code, $msg), array('status' => (int) $code));
             }
 
             $choice  = isset($body['choices'][0]) ? $body['choices'][0] : array();

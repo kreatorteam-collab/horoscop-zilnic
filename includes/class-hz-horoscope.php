@@ -7,8 +7,8 @@ if (!defined('ABSPATH')) { exit; }
  * cheie per site, cost tracking, limită lunară și continuare automată.
  *
  * v3.58.0: două frecvențe (`hz_frequency`):
- *  - 'weekly' (implicit): un articol pe săptămână, duminica (săptămâna care începe
- *    a doua zi) sau lunea (săptămâna în curs). Titlul are o formulare proprie
+ *  - 'weekly' (implicit): un articol pe săptămână, lunea (săptămâna în curs; implicit
+ *    din v3.58.1) sau duminica (săptămâna care începe a doua zi). Titlul are o formulare proprie
  *    fiecărui site (vezi week_title_variants), ca rețeaua să nu mai publice același
  *    titlu pe zeci de domenii;
  *  - 'daily': comportamentul de dinainte, un articol pe zi.
@@ -20,11 +20,16 @@ if (!defined('ABSPATH')) { exit; }
  */
 class HZ_Horoscope {
 
-    const HOOK = 'hz_horoscope_daily';
-    const LOCK = 'hz_horo_lock';
+    const HOOK  = 'hz_horoscope_daily';
+    const RETRY = 'hz_horoscope_retry';
+    const LOCK  = 'hz_horo_lock';
+
+    /** v3.58.1: după o generare eșuată reîncercăm de atâtea ori în aceeași zi, la 30 de minute. */
+    const MAX_RETRIES = 4;
 
     public function init() {
         add_action(self::HOOK, array($this, 'cron_run'));
+        add_action(self::RETRY, array($this, 'cron_run'));
         add_action('init', array($this, 'maybe_schedule'));
         add_action('wp_ajax_hz_test', array($this, 'ajax_test'));
 
@@ -76,7 +81,23 @@ class HZ_Horoscope {
     /* ---- Rulare ---- */
 
     public function cron_run() {
-        $this->run(false);
+        // Gateway-ul poate ține cererea ~100 s până la 524, iar refacerea cu Claude încă ~2 min.
+        if (function_exists('set_time_limit')) { @set_time_limit(600); }
+        $res = $this->run(false);
+        // v3.58.1: cronul e zilnic, deci o eroare trecătoare (ex. 524 de la serverul API)
+        // amâna horoscopul cu o zi întreagă. Reîncercăm la 30 de minute, de cel mult
+        // MAX_RETRIES ori pe zi; „nu e ziua" / „există deja" / „oprit" nu se reiau.
+        if (!is_wp_error($res) || $res->get_error_code() !== 'hz_fail') {
+            return;
+        }
+        $today = current_time('Y-m-d');
+        $state = explode('|', (string) get_option('hz_retry', ''));
+        $count = (isset($state[0], $state[1]) && $state[0] === $today) ? (int) $state[1] : 0;
+        if ($count >= self::MAX_RETRIES || wp_next_scheduled(self::RETRY)) {
+            return;
+        }
+        update_option('hz_retry', $today . '|' . ($count + 1), 'no');
+        wp_schedule_single_event(time() + 30 * MINUTE_IN_SECONDS, self::RETRY);
     }
 
     /* ---- Săptămânal (v3.58.0) ---- */
@@ -85,9 +106,9 @@ class HZ_Horoscope {
         return get_option('hz_frequency', 'weekly') !== 'daily';
     }
 
-    /** Ziua de publicare a horoscopului săptămânal, ISO: 7 = duminică (implicit), 1 = luni. */
+    /** Ziua de publicare a horoscopului săptămânal, ISO: 1 = luni (implicit, v3.58.1), 7 = duminică. */
     public static function weekday() {
-        return (int) get_option('hz_weekday', 7) === 1 ? 1 : 7;
+        return (int) get_option('hz_weekday', 1) === 7 ? 7 : 1;
     }
 
     /** Momentul curent în fusul orar al site-ului (același ceas ca current_time()). */
