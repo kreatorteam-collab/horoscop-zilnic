@@ -658,6 +658,18 @@ class HZ_Magnific {
                 // același cont trag din aceeași cotă și vor primi același refuz.
                 return new WP_Error('hzb_credits', 'Cota de descărcări de stock a contului Magnific e epuizată azi (limita e pe CONT, nu pe cheie - o cheie nouă din același cont nu adaugă cotă).');
             }
+            // „Tool not allowed for enterprise account." = CHEIA (contul ei) n-are voie să
+            // descarce prin API. Nu e vina resursei: toți candidații ar primi același refuz
+            // (v3.61.2: 4 site-uri rămase pe o astfel de cheie n-au mai pus nicio poză).
+            // O tratăm ca pe o cheie fără cotă: o scoatem din joc azi pe toată flota,
+            // trecem pe următoarea din pool și reîncercăm O DATĂ aceeași descărcare.
+            if (stripos($msg, 'not allowed') !== false) {
+                self::mark_exhausted();
+                if (!$rotated && self::rotate_key()) {
+                    return self::sideload($resource_id, $post_id, $title, true);
+                }
+                return new WP_Error('hzb_credits', 'Cheia Magnific a site-ului nu are voie să descarce prin API (' . $msg . ') și nu există altă cheie liberă în pool.');
+            }
             return new WP_Error('hzb_api', 'Magnific: descărcarea a eșuat (' . $msg . ').');
         }
         self::log_download();
