@@ -156,6 +156,27 @@ class HZ_News {
      * goală (0), valoarea globală „Știri pe zi, pe secțiune". Externe are de 5-10 ori mai
      * multe știri decât celelalte rubrici, deci plafonul unic o ținea pe loc.
      */
+    /** Starea fiecărei secțiuni (v3.61.1), pentru panoul central: pornită, categoria, ținta, azi, ultima rulare fără știre. */
+    public static function diag() {
+        $t = get_option(self::TODAY, array());
+        $today = (is_array($t) && isset($t['d']) && $t['d'] === current_time('Y-m-d') && isset($t['c']) && is_array($t['c'])) ? $t['c'] : array();
+        $skip = get_option('hzn_last_skip', array());
+        $out = array();
+        foreach (self::sections() as $key => $sec) {
+            $cid = (int) get_option('hzn_cat_' . $key, 0);
+            $term = $cid > 0 ? get_term($cid, 'category') : null;
+            $out[$key] = array(
+                'on'        => (int) get_option('hzn_on_' . $key, 1),
+                'category'  => $term instanceof WP_Term ? html_entity_decode($term->name, ENT_QUOTES, 'UTF-8') : 'automat (din categoriile site-ului)',
+                'per_day'   => self::per_day($key),
+                'today'     => isset($today[$key]) ? (int) $today[$key] : 0,
+                'paused'    => get_transient('hzn_empty_' . $key) ? 1 : 0,
+                'last_skip' => is_array($skip) && isset($skip[$key]) ? (string) $skip[$key] : '',
+            );
+        }
+        return $out;
+    }
+
     public static function per_day($section) {
         $own = (int) get_option('hzn_per_' . $section, 0);
         if ($own > 0) { return max(1, min(50, $own)); }
@@ -314,30 +335,44 @@ class HZ_News {
             $why = (string) get_transient('hzn_fetch_problem');
             if ($why !== '') { return new WP_Error('hzn_source', 'sursa nu răspunde — ' . $why); }
         }
+        // v3.61.1: de ce n-a ieșit nicio știre (înainte: doar „Nicio știre nouă”, deși sursele aveau articole).
+        $tally = array();
+        $seen_before = 0;
+        $recent = $this->recent_titles();
         foreach ($cands as $url) {
-            if ($this->seen($url)) { continue; }
+            if ($this->seen($url, $section)) { $seen_before++; continue; }
             if ($tries >= 4 || ++$fetched > 12) { break; }
 
             $art = $this->fetch_article($url);
             if (is_wp_error($art)) {
                 $this->mark_seen($url, $art->get_error_code());
+                $tally[$art->get_error_code()] = (isset($tally[$art->get_error_code()]) ? $tally[$art->get_error_code()] : 0) + 1;
                 continue;
             }
             if ($this->post_exists($url, $art['title'])) {
                 $this->mark_seen($url, 'exista');
+                $tally['exista'] = (isset($tally['exista']) ? $tally['exista'] : 0) + 1;
                 continue;
             }
 
             // Clasificarea rulează mereu (v3.53.1): pe lângă categorie și temele excluse,
-            // respinge tot ce nu e știre (advertoriale, texte promoționale).
+            // respinge tot ce nu e știre (advertoriale, texte promoționale). v3.61.1: și ce
+            // nu ține de secțiune, și același eveniment ca o știre publicată deja pe site.
             $cat = '';
-            $res = $this->classify($art, (bool) $auto);
+            $res = $this->classify($art, (bool) $auto, $section, $recent);
             if (is_wp_error($res)) {
                 if (in_array($res->get_error_code(), array('cw_no_key', 'cw_limit', 'cw_api', 'cw_http'), true)) { return $res; }
                 $res = '';
             }
             if ($res === '') {
-                $this->mark_seen($url, 'exclus_sau_fara_categorie');
+                if ($this->skip_why === 'dublura') {
+                    $this->mark_seen($url, 'dublura');
+                } else {
+                    // Nepotrivită pentru secțiunea / categoriile de acum: doar pe secțiunea asta
+                    // (o știre politică respinsă la Actualitate rămâne bună pentru Politică).
+                    $this->mark_seen($url, 'exclus_sau_fara_categorie', $section);
+                }
+                $tally[$this->skip_why] = (isset($tally[$this->skip_why]) ? $tally[$this->skip_why] : 0) + 1;
                 continue;
             }
             if ($auto) { $cat = $res; }
@@ -350,14 +385,68 @@ class HZ_News {
                     return $rw;
                 }
                 $this->mark_seen($url, $rw->get_error_code());
+                $tally['rescriere'] = (isset($tally['rescriere']) ? $tally['rescriere'] : 0) + 1;
                 continue;
             }
 
             $this->mark_seen($url, 'preluat');
             return $this->publish($section, $url, $art, $rw, $test);
         }
-        return new WP_Error('hzn_none', 'Nicio știre nouă de preluat.');
+        $left = 0;
+        foreach ($cands as $u) { if (!$this->seen($u, $section)) { $left++; } }
+        $msg = $this->none_message(count($cands), $seen_before, $tally, $left, (bool) $auto);
+        $skip = get_option('hzn_last_skip', array());
+        if (!is_array($skip)) { $skip = array(); }
+        $skip[$section] = current_time('Y-m-d H:i') . ' — ' . $msg;
+        update_option('hzn_last_skip', $skip, 'no');
+        return new WP_Error('hzn_none', $msg);
     }
+
+    /** De ce nu s-a publicat nimic, pe scurt și pe înțeles (v3.61.1). */
+    private function none_message($total, $seen_before, array $tally, $left, $auto) {
+        if (!$total) { return 'Nicio știre nouă de preluat (sursele n-au acum articole).'; }
+        $max_age = max(1, (int) get_option('hzn_max_age', 24));
+        $labels = array(
+            'nepotrivita'     => $auto ? 'nu țin de secțiune sau nu se potrivesc cu nicio categorie a site-ului (ori sunt pe o temă exclusă)'
+                                       : 'nu țin de secțiune sau sunt pe o temă exclusă',
+            'dublura'         => 'sunt același eveniment ca o știre publicată deja pe site',
+            'exista'          => 'sunt deja pe site',
+            'hzn_old'         => 'sunt mai vechi de ' . $max_age . ' ore',
+            'hzn_short'       => 'au text prea scurt (video / live)',
+            'hzn_advertorial' => 'sunt advertoriale',
+            'hzn_fetch'       => 'nu s-au putut descărca',
+            'rescriere'       => 'au picat la verificarea textului rescris',
+        );
+        arsort($tally);
+        $parts = array();
+        foreach ($tally as $k => $n) { $parts[] = $n . ' ' . (isset($labels[$k]) ? $labels[$k] : $k); }
+        $checked = array_sum($tally);
+        $msg = 'Nicio știre de publicat';
+        if ($checked) { $msg .= ' — din ' . $checked . ' verificate acum: ' . implode(', ', $parts); }
+        if ($seen_before) { $msg .= ($checked ? '; ' : ' — ') . $seen_before . ' din ' . $total . ' articole din surse fuseseră verificate deja'; }
+        if ($left) { $msg .= '; mai sunt ' . $left . ' de verificat la rularea următoare'; }
+        return $msg . '.';
+    }
+
+    /** Titlurile știrilor puse pe site de modul în ultimele ore (pentru dubluri), cele mai noi întâi. */
+    private function recent_titles($hours = 36) {
+        global $wpdb;
+        $rows = $wpdb->get_col($wpdb->prepare(
+            "SELECT p.post_title FROM {$wpdb->posts} p JOIN {$wpdb->postmeta} m ON m.post_id = p.ID AND m.meta_key = %s
+             WHERE p.post_type = 'post' AND p.post_status IN ('publish','draft','future','pending')
+               AND p.post_date >= %s ORDER BY p.post_date DESC LIMIT 40",
+            self::META_SRC, wp_date('Y-m-d H:i:s', time() - $hours * HOUR_IN_SECONDS)
+        ));
+        $out = array();
+        foreach ((array) $rows as $t) {
+            $t = trim(wp_strip_all_tags((string) $t));
+            if ($t !== '') { $out[] = mb_substr($t, 0, 160); }
+        }
+        return array_values(array_unique($out));
+    }
+
+    /** Motivul ultimei respingeri din classify(): 'nepotrivita' | 'dublura'. */
+    private $skip_why = 'nepotrivita';
 
     /* ---------------- sursa ---------------- */
 
@@ -658,19 +747,21 @@ class HZ_News {
 
     /* ---------------- evidența ---------------- */
 
-    private function seen($url) {
+    private function seen($url, $section = '') {
         $s = get_option(self::SEEN, array());
-        return is_array($s) && isset($s[md5($url)]);
+        if (!is_array($s)) { return false; }
+        return isset($s[md5($url)]) || ($section !== '' && isset($s[md5($section . '|' . $url)]));
     }
 
-    private function mark_seen($url, $why) {
+    /** $section = respingerea ține doar de secțiunea asta (v3.61.1); gol = adresa nu se mai ia deloc. */
+    private function mark_seen($url, $why, $section = '') {
         $s = get_option(self::SEEN, array());
         if (!is_array($s)) { $s = array(); }
         $cut = time() - self::SEEN_DAYS * DAY_IN_SECONDS;
         foreach ($s as $k => $v) {
             if (!is_array($v) || (int) $v[0] < $cut) { unset($s[$k]); }
         }
-        $s[md5($url)] = array(time(), (string) $why);
+        $s[md5($section !== '' ? $section . '|' . $url : $url)] = array(time(), (string) $why);
         update_option(self::SEEN, $s, 'no');
     }
 
@@ -739,11 +830,29 @@ class HZ_News {
      * - fără: doar verificarea temelor excluse ('OK' = se poate prelua).
      * '' = se sare (nicio categorie potrivită sau temă exclusă).
      */
-    private function classify($art, $with_cats = true) {
+    private function classify($art, $with_cats = true, $section = '', array $recent = array()) {
+        $this->skip_why = 'nepotrivita';
         $cats   = $with_cats ? self::site_categories() : array();
         $topics = self::excluded_topics();
         $model  = self::effective_model();
         $prompt = "Știre:\nTITLU: " . $art['title'] . "\nÎNCEPUT: " . mb_substr($art['text'], 0, 700);
+        // v3.61.1: sursele de rezervă au feed-uri generale (economica.net/rss aduce și politică
+        // externă), deci secțiunea se verifică explicit: altfel „Trump – Kim Jong Un” ieșea la Economie.
+        $scope = array(
+            'actualitate' => 'Actualitate — știri din România, de actualitate internă (social, administrație, justiție, educație, accidente, politică internă)',
+            'politica'    => 'Politică — viața politică din România (guvern, parlament, partide, alegeri, președinție)',
+            'economie'    => 'Economie — economie, afaceri, companii, bani, finanțe, bănci, energie, piețe, taxe, prețuri',
+            'externe'     => 'Externe — știri internaționale, despre ce se întâmplă în afara României',
+        );
+        if (isset($scope[$section])) {
+            $prompt .= "\n\nSECȚIUNEA PENTRU CARE SE PREIA: " . $scope[$section] . ". Dacă știrea nu ține în principal de secțiunea asta, răspunde NICIUNA.";
+        }
+        // v3.61.1: aceeași întâmplare vine des de la două adrese (economica.net a dat Tesla de două ori,
+        // ambele s-au publicat). Titlurile deja puse pe site intră în același apel, fără cost în plus.
+        if ($recent) {
+            $prompt .= "\n\nȘTIRI PUBLICATE DEJA PE SITE (ultimele 36 de ore):\n- " . implode("\n- ", array_slice($recent, 0, 40))
+                     . "\nDacă știrea relatează ACELAȘI eveniment ca una dintre ele (chiar din altă sursă, cu alt titlu sau cu detalii noi minore), răspunde DUBLURA.";
+        }
         // v3.53.1: se preiau DOAR știri. Advertorialele și textele promoționale se sar.
         $prompt .= "\n\nDacă textul NU e o știre (advertorial, articol plătit sau sponsorizat, comunicat de presă al unei firme, "
                  . "prezentare de produs / serviciu / aplicație, ghid sau sfaturi de cumpărare cu scop comercial), răspunde NICIUNA.";
@@ -769,6 +878,7 @@ class HZ_News {
         }
         if (is_wp_error($r)) { return $r; }
         $ans = mb_strtolower(remove_accents(trim(wp_strip_all_tags((string) $r['text']), " \t\n\r\"'„”.«»")));
+        if ($ans === 'dublura') { $this->skip_why = 'dublura'; return ''; }
         if (!$cats) { return $ans === 'ok' ? 'OK' : ''; }
         foreach ($cats as $c) {
             if (mb_strtolower(remove_accents($c)) === $ans) { return $c; }
@@ -782,6 +892,12 @@ class HZ_News {
         $system   = str_replace('digi24.ro', self::source_name($art['url']), self::system_prompt());
         $override = function () use ($system) { return $system; };
         $prompt   = "TITLUL ORIGINAL: " . $art['title'] . "\n\nTEXTUL ORIGINAL:\n" . $art['text'];
+        // v3.61.1: aceeași știre o preiau mai multe site-uri ale flotei; fără numele publicației,
+        // același text dădea același titlu (Tesla: identic pe revistabravo și comunicateinpresa).
+        $host = preg_replace('#^www\.#', '', strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST)));
+        $blog = trim(wp_specialchars_decode((string) get_bloginfo('name'), ENT_QUOTES));
+        $prompt  .= "\n\nPUBLICAȚIA: " . $host . ($blog !== '' && mb_strtolower($blog) !== $host ? ' („' . $blog . '”)' : '')
+                  . ". Aceeași știre o preiau și alte publicații: alege pentru titlu și pentru primul paragraf o formulare proprie, nu cea mai evidentă și nu cea din titlul original.";
         $cats     = $cat === '' ? self::site_categories() : array();
         if ($cats) {
             $prompt .= "\n\nCATEGORIILE SITE-ULUI (pentru „categorie” alegi UNA, scrisă exact ca aici): " . implode(' | ', $cats);
@@ -1419,6 +1535,9 @@ TXT;
                 ?>
                 <?php if ($last !== '') : ?><span style="display:block;"><?php echo esc_html(sprintf(__('Ultima știre: %s', 'horoscop-zilnic'), $last)); ?></span><?php endif; ?>
                 <?php if ($err !== '') : ?><span style="color:#b32d2e;display:block;"><?php echo esc_html(sprintf(__('Ultima eroare: %s', 'horoscop-zilnic'), $err)); ?></span><?php endif; ?>
+                <?php $skips = get_option('hzn_last_skip', array()); if (is_array($skips)) : foreach ($skips as $sk => $sv) : if (!isset(self::sections()[$sk])) { continue; } ?>
+                    <span style="display:block;color:#996800;"><?php echo esc_html(self::sections()[$sk]['label'] . ': ' . $sv); ?></span>
+                <?php endforeach; endif; ?>
                 <?php $li = (string) get_option('hzn_last_image', ''); if ($li !== '') : ?><span style="display:block;"><?php echo esc_html(sprintf(__('Ultima imagine: %s', 'horoscop-zilnic'), $li)); ?></span><?php endif; ?>
                 <span style="display:block;"><?php echo esc_html(sprintf(__('Rulează pe: %1$s · model %2$s', 'horoscop-zilnic'),
                     CW_API::openai_base() !== CW_API::OPENAI_BASE ? CW_API::openai_base() : 'OpenAI direct', self::effective_model())); ?></span>

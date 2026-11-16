@@ -278,6 +278,8 @@ class HZ_Remote {
             'news_last'       => (string) get_option('hzn_last_run', ''),
             'news_error'      => (string) get_option('hzn_last_error', ''),
             'news_feeds'      => class_exists('HZ_News') ? array_combine(array_keys(HZ_News::sections()), array_map(array('HZ_News', 'feeds'), array_keys(HZ_News::sections()))) : array(),
+            // v3.61.1: pe secțiuni — pornită, categoria, ținta, câte azi, de ce n-a ieșit nimic ultima dată.
+            'news_sections'   => class_exists('HZ_News') ? HZ_News::diag() : array(),
             'ai_month_cost'   => class_exists('CW_Usage') ? round((float) CW_Usage::month_cost(), 4) : 0,
             'ai_month_limit'  => (float) get_option('cw_monthly_cost_limit', 0),
             'web_search'      => (int) get_option('cw_web_search', 0),
