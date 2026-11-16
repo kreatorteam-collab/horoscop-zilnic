@@ -39,6 +39,7 @@ $options = array(
     'hzn_on_actualitate', 'hzn_on_politica', 'hzn_on_economie', 'hzn_on_externe',
     'hzn_cat_actualitate', 'hzn_cat_politica', 'hzn_cat_economie', 'hzn_cat_externe',
     'hzn_per_actualitate', 'hzn_per_politica', 'hzn_per_economie', 'hzn_per_externe',
+    'hzn_feeds_actualitate', 'hzn_feeds_politica', 'hzn_feeds_economie', 'hzn_feeds_externe', 'hzn_sources_check',
 );
 foreach ($options as $opt) { delete_option($opt); }
 delete_transient('cw_update_info');
