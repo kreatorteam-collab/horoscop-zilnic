@@ -69,6 +69,58 @@ class HZ_News {
         );
     }
 
+    /**
+     * v3.61.0: sursele fiecărei secțiuni, în ordinea încercării (o adresă pe rând).
+     * digi24 rămâne prima; dacă serverul nu ajunge la ea (16.11.2026: „Connection timed out"
+     * pe flotă), se trece la următoarele. Adresele de pe digi24.ro se citesc ca până acum
+     * (pagina secțiunii, împărțire după cale); restul sunt feed-uri RSS ale secțiunii, din
+     * care se iau doar linkurile de articol de pe același domeniu.
+     */
+    public static function default_feeds() {
+        return array(
+            'actualitate' => array('https://www.digi24.ro/stiri/actualitate', 'https://hotnews.ro/c/actualitate/feed', 'https://www.mediafax.ro/social/rss'),
+            'politica'    => array('https://www.digi24.ro/stiri/actualitate/politica', 'https://www.mediafax.ro/politic/rss', 'https://hotnews.ro/c/actualitate/feed'),
+            'economie'    => array('https://www.digi24.ro/stiri/economie', 'https://www.economica.net/rss', 'https://www.profit.ro/rss', 'https://hotnews.ro/c/economie/feed'),
+            'externe'     => array('https://www.digi24.ro/stiri/externe', 'https://www.mediafax.ro/externe/rss', 'https://hotnews.ro/c/international/feed'),
+        );
+    }
+
+    /** Sursele secțiunii: setarea (o adresă pe rând) sau lista implicită. */
+    public static function feeds($section) {
+        $list = self::feed_list((string) get_option('hzn_feeds_' . $section, ''));
+        if ($list) { return $list; }
+        $def = self::default_feeds();
+        return isset($def[$section]) ? $def[$section] : array();
+    }
+
+    /** Adresele valide dintr-un text (o adresă pe rând, cu http:// sau https://). */
+    private static function feed_list($raw) {
+        $out = array();
+        foreach (preg_split('/[\r\n,]+/', (string) $raw) as $u) {
+            $u = trim($u);
+            if (!preg_match('#^https?://[a-z0-9-]+(\.[a-z0-9-]+)+(/|$)#i', $u)) { continue; }
+            $u = esc_url_raw($u);
+            if ($u !== '') { $out[] = $u; }
+        }
+        return array_values(array_unique($out));
+    }
+
+    /** Lista din setări, curățată (o adresă validă pe rând). */
+    public static function sanitize_feeds($raw) {
+        return implode("\n", self::feed_list($raw));
+    }
+
+    /** digi24.ro? (are cititorul ei propriu, pe pagini + împărțire după cale) */
+    public static function is_digi($url) {
+        return (bool) preg_match('#^https?://([a-z0-9-]+\.)*digi24\.ro(/|$)#i', (string) $url);
+    }
+
+    /** Numele sursei din atribuire: domeniul fără „www.” (ex. „economica.net”). */
+    public static function source_name($url) {
+        $h = strtolower((string) wp_parse_url((string) $url, PHP_URL_HOST));
+        return preg_replace('#^www\.#', '', $h);
+    }
+
     /** Site-urile pe care modulul pornește singur la update (restul flotei: oprit). */
     public static function default_hosts() {
         return array('comunicateinpresa.ro', 'revistabravo.ro');
@@ -115,6 +167,7 @@ class HZ_News {
         add_action('init', array($this, 'maybe_schedule'));
         add_action('admin_init', array($this, 'register_settings'));
         add_action('wp_ajax_hzn_test', array($this, 'ajax_test'));
+        add_action('wp_ajax_hzn_check_sources', array($this, 'ajax_check_sources'));
         add_action('update_option_hzn_enabled', array($this, 'reschedule'), 10, 0);
         // Setări schimbate (aici sau serverul / cheia din AI Writer) = eroarea veche nu mai e relevantă.
         foreach (array('hzn_model', 'hzn_enabled', 'cw_openai_base', 'cw_openai_api_key', 'cw_default_model') as $opt) {
@@ -308,16 +361,37 @@ class HZ_News {
 
     /* ---------------- sursa ---------------- */
 
-    /** URL-urile de articol din secțiune, cele noi primele (pagina secțiunii + RSS). */
+    /**
+     * URL-urile de articol din secțiune, în ordinea surselor (v3.61.0: digi24, apoi
+     * sursele de rezervă). La digi24 se adaugă și feed-ul RSS general, împărțit după cale.
+     */
     private function candidates($section) {
         $sec  = self::sections()[$section];
         $urls = array();
-        foreach (array($sec['list'], (string) get_option('hzn_rss_url', 'https://www.digi24.ro/rss')) as $src) {
-            if ($src === '') { continue; }
-            foreach ($this->links_from($src) as $u) {
-                $path = (string) wp_parse_url($u, PHP_URL_PATH);
-                if (preg_match($sec['match'], $path) && !$this->url_excluded($path)) { $urls[$u] = true; }
+        $srcs = array();
+        foreach (self::feeds($section) as $f) {
+            $srcs[] = $f;
+            if (self::is_digi($f)) {
+                $rss = (string) get_option('hzn_rss_url', 'https://www.digi24.ro/rss');
+                if ($rss !== '' && self::is_digi($rss)) { $srcs[] = $rss; }
             }
+        }
+        $problems = array();
+        foreach (array_unique($srcs) as $src) {
+            $this->fetch_problem = '';
+            $links = $this->links_from($src);
+            if (!$links && $this->fetch_problem !== '') { $problems[] = $this->fetch_problem; }
+            foreach ($links as $u) {
+                $path = (string) wp_parse_url($u, PHP_URL_PATH);
+                if (self::is_digi($u) && !preg_match($sec['match'], $path)) { continue; }
+                if (!$this->url_excluded($path)) { $urls[$u] = true; }
+            }
+        }
+        // Eroarea afișată: doar dacă NICIO sursă n-a răspuns.
+        if (!$urls && $problems) {
+            set_transient('hzn_fetch_problem', implode('; ', array_unique($problems)), 30 * MINUTE_IN_SECONDS);
+        } else {
+            delete_transient('hzn_fetch_problem');
         }
         return array_keys($urls);
     }
@@ -326,26 +400,62 @@ class HZ_News {
     private function links_from($src) {
         $key    = 'hzn_links_' . md5($src);
         $cached = get_transient($key);
-        if (is_array($cached)) { return $cached; }
+        if (is_array($cached)) {
+            if (!$cached) { $this->fetch_problem = (string) get_transient($key . '_err'); }
+            return $cached;
+        }
 
         $body = $this->http_get($src);
-        $out  = array();
-        if ($body !== '') {
-            // href="…" din pagini + <link>…</link> / <guid>…</guid> din RSS.
+        $out  = $body !== '' ? $this->parse_links($src, $body) : array();
+        if ($body === '') {
+            // Problema rămâne la vedere până la următoarea încercare (cache-ul ar ascunde-o).
+            set_transient($key . '_err', $this->fetch_problem, 5 * MINUTE_IN_SECONDS);
+        } else {
+            delete_transient($key . '_err');
+        }
+        set_transient($key, $out, $body !== '' ? 15 * MINUTE_IN_SECONDS : 5 * MINUTE_IN_SECONDS);
+        return $out;
+    }
+
+    /**
+     * Linkurile de articol dintr-un răspuns. digi24: href-urile din pagină + <link>/<guid>
+     * din RSS, filtrate după forma adresei. Altă sursă: <link>/<guid> din elementele
+     * <item>/<entry> ale feed-ului, de pe același domeniu cu feed-ul.
+     */
+    private function parse_links($src, $body) {
+        $out = array();
+        if (self::is_digi($src)) {
             preg_match_all('#(?:href=["\']|<link>|<guid[^>]*>)\s*(?:<!\[CDATA\[)?\s*([^"\'<\s]+)#i', $body, $m);
             foreach ($m[1] as $raw) {
                 $u = $this->article_url(html_entity_decode($raw, ENT_QUOTES, 'UTF-8'));
                 if ($u !== '') { $out[$u] = true; }
             }
+            return array_keys($out);
         }
-        $out = array_keys($out);
-        set_transient($key, $out, $body !== '' ? 15 * MINUTE_IN_SECONDS : 5 * MINUTE_IN_SECONDS);
-        if ($body === '' && $this->fetch_problem !== '') {
-            set_transient('hzn_fetch_problem', $this->fetch_problem, 30 * MINUTE_IN_SECONDS);
-        } elseif ($body !== '') {
-            delete_transient('hzn_fetch_problem');
+        $host = self::source_name($src);
+        preg_match_all('#<(item|entry)\b.*?</\1>#is', $body, $items);
+        foreach ($items[0] as $it) {
+            $raw = '';
+            if (preg_match('#<link>\s*(?:<!\[CDATA\[)?\s*([^<\s\]]+)#i', $it, $m)) { $raw = $m[1]; }
+            elseif (preg_match('#<link[^>]+href=["\']([^"\']+)#i', $it, $m)) { $raw = $m[1]; }
+            elseif (preg_match('#<guid[^>]*>\s*(?:<!\[CDATA\[)?\s*(https?://[^<\s\]]+)#i', $it, $m)) { $raw = $m[1]; }
+            $u = $this->feed_article_url(html_entity_decode($raw, ENT_QUOTES, 'UTF-8'), $host);
+            if ($u !== '') { $out[$u] = true; }
         }
-        return $out;
+        return array_keys($out);
+    }
+
+    /** Adresa de articol dintr-un feed (alt site decât digi24) sau '' (listări, video, live). */
+    private function feed_article_url($u, $host) {
+        $u = trim($u);
+        $p = wp_parse_url($u);
+        if (empty($p['host']) || empty($p['path']) || self::source_name($u) !== $host) { return ''; }
+        $path = rtrim($p['path'], '/');
+        if (preg_match('#(^|/)(tag|tags|category|categorie|c|author|autor|page|feed|rss)(/|$)#i', $path)) { return ''; }
+        if (preg_match('#(^|/|-)(live|video|galerie|foto|podcast)(-|/|$)#i', $path)) { return ''; }
+        // Slug de articol: cel puțin 4 cuvinte, sau un ID numeric (ex. „…_123456.html”).
+        if (!preg_match('#([a-z0-9]+-){3,}[a-z0-9]+|\d{4,}#i', $path)) { return ''; }
+        return 'https://' . $p['host'] . $p['path'];
     }
 
     /** URL canonic de articol digi24 sau '' (listări, taguri, video, live). */
@@ -362,10 +472,21 @@ class HZ_News {
         return 'https://www.digi24.ro' . $path;
     }
 
-    /** De ce n-a mers ultima citire de pe digi24 ('' = a mers). v3.60.2 */
+    /** De ce n-a mers ultima citire de la sursă ('' = a mers). v3.60.2 */
     private $fetch_problem = '';
 
+    /** Verificarea surselor încearcă și serverele marcate „nu răspund”. */
+    private $ignore_dead = false;
+
     private function http_get($url, $timeout = 25) {
+        // v3.61.0: un server care nu răspunde la conexiune (timeout) se sare 30 de minute,
+        // ca să nu blocheze fiecare rulare câte 10-25 de secunde.
+        $host = (string) wp_parse_url($url, PHP_URL_HOST);
+        $dead = get_transient('hzn_dead_' . md5($host));
+        if ($dead && !$this->ignore_dead) {
+            $this->fetch_problem = $host . ': ' . $dead . ' (se reîncearcă peste cel mult 30 de minute)';
+            return '';
+        }
         $r = wp_remote_get($url, array(
             'timeout'     => $timeout,
             'redirection' => 3,
@@ -373,9 +494,14 @@ class HZ_News {
             'headers'     => array('Accept-Language' => 'ro-RO,ro;q=0.9'),
         ));
         if (is_wp_error($r)) {
-            $this->fetch_problem = wp_parse_url($url, PHP_URL_HOST) . ': ' . $r->get_error_message();
+            $msg = $r->get_error_message();
+            $this->fetch_problem = $host . ': ' . $msg;
+            if (preg_match('/timed out|resolve host|connect/i', $msg)) {
+                set_transient('hzn_dead_' . md5($host), $msg, 30 * MINUTE_IN_SECONDS);
+            }
             return '';
         }
+        delete_transient('hzn_dead_' . md5($host));
         $code = (int) wp_remote_retrieve_response_code($r);
         if ($code !== 200) {
             $this->fetch_problem = wp_parse_url($url, PHP_URL_HOST) . ' a răspuns HTTP ' . $code
@@ -407,6 +533,8 @@ class HZ_News {
             $title = $h1->length ? trim($h1->item(0)->textContent) : '';
         }
         $title = trim(preg_replace('#\s*[|\-–]\s*Digi24\s*$#iu', '', $title));
+        $site  = $this->meta($xp, 'og:site_name');
+        if ($site !== '') { $title = trim(preg_replace('#\s*[|\-–:]\s*' . preg_quote($site, '#') . '\s*$#iu', '', $title)); }
 
         $published = $this->meta($xp, 'article:published_time');
         $body      = '';
@@ -651,7 +779,7 @@ class HZ_News {
     private function rewrite($art, $cat = '') {
         $model = self::effective_model();
 
-        $system   = self::system_prompt();
+        $system   = str_replace('digi24.ro', self::source_name($art['url']), self::system_prompt());
         $override = function () use ($system) { return $system; };
         $prompt   = "TITLUL ORIGINAL: " . $art['title'] . "\n\nTEXTUL ORIGINAL:\n" . $art['text'];
         $cats     = $cat === '' ? self::site_categories() : array();
@@ -734,9 +862,10 @@ class HZ_News {
      * adăugăm noi la finalul primului paragraf.
      */
     private function source_link($content, $url) {
-        $a = '<a href="' . esc_url($url) . '" target="_blank" rel="nofollow noopener">digi24.ro</a>';
+        $name = self::source_name($url);
+        $a = '<a href="' . esc_url($url) . '" target="_blank" rel="nofollow noopener">' . esc_html($name) . '</a>';
         $n = 0;
-        $content = preg_replace('/\bdigi24\.ro\b/iu', $a, $content, 1, $n);
+        $content = preg_replace('/(?<![\w.-])' . preg_quote($name, '/') . '(?![\w-])/iu', $a, $content, 1, $n);
         if ($n > 0) { return $content; }
         return preg_replace('#\.?\s*</p>#u', ', conform ' . $a . '.</p>', $content, 1);
     }
@@ -1094,7 +1223,7 @@ TXT;
         $tmp = wp_tempnam('hzn-img');
         $r   = wp_remote_get($url, array(
             'timeout' => 60, 'stream' => true, 'filename' => $tmp, 'user-agent' => self::UA,
-            'headers' => array('Referer' => 'https://www.digi24.ro/', 'Accept' => 'image/avif,image/webp,image/*,*/*;q=0.8'),
+            'headers' => array('Referer' => 'https://' . wp_parse_url($url, PHP_URL_HOST) . '/', 'Accept' => 'image/avif,image/webp,image/*,*/*;q=0.8'),
         ));
         if (is_wp_error($r) || (int) wp_remote_retrieve_response_code($r) !== 200) {
             @unlink($tmp);
@@ -1198,10 +1327,61 @@ TXT;
             $opts['hzn_on_' . $key]  = 'absint';
             $opts['hzn_cat_' . $key] = 'absint';
             $opts['hzn_per_' . $key] = 'absint';
+            $opts['hzn_feeds_' . $key] = array(__CLASS__, 'sanitize_feeds');
         }
         foreach ($opts as $name => $cb) {
             register_setting('hzn_settings', $name, array('sanitize_callback' => $cb));
         }
+    }
+
+    /**
+     * v3.61.0: verifică de pe SERVERUL site-ului fiecare sursă a fiecărei secțiuni:
+     * răspunde? câte linkuri de articol are? (fără cache, fără AI, nu publică nimic)
+     * @return array [secțiune => [[url, ok, links, ms, error, sample]]]
+     */
+    public function check_sources() {
+        $this->ignore_dead = true;
+        $out = array();
+        $done = array();
+        foreach (array_keys(self::sections()) as $key) {
+            $out[$key] = array();
+            foreach (self::feeds($key) as $src) {
+                if (!isset($done[$src])) {
+                    $this->fetch_problem = '';
+                    $t0   = microtime(true);
+                    $body = $this->http_get($src, 15);
+                    $links = $body !== '' ? $this->parse_links($src, $body) : array();
+                    $done[$src] = array(
+                        'url'    => $src,
+                        'ok'     => $body !== '' && count($links) > 0,
+                        'links'  => count($links),
+                        'ms'     => (int) round((microtime(true) - $t0) * 1000),
+                        'error'  => $body === '' ? $this->fetch_problem : (count($links) ? '' : 'răspunde, dar nu are linkuri de articol (adresă greșită de feed?)'),
+                        'sample' => $links ? $links[0] : '',
+                    );
+                    if ($body !== '') { set_transient('hzn_links_' . md5($src), $links, 15 * MINUTE_IN_SECONDS); }
+                }
+                $out[$key][] = $done[$src];
+            }
+        }
+        $this->ignore_dead = false;
+        update_option('hzn_sources_check', array('at' => current_time('Y-m-d H:i'), 'res' => $out), 'no');
+        return $out;
+    }
+
+    public function ajax_check_sources() {
+        check_ajax_referer('hzn_test', 'nonce');
+        if (!current_user_can('manage_options')) { wp_send_json_error(array('message' => 'Permisiune refuzată.')); }
+        if (function_exists('set_time_limit')) { @set_time_limit(180); }
+        $lines = array();
+        foreach ($this->check_sources() as $key => $rows) {
+            $lines[] = self::sections()[$key]['label'] . ':';
+            foreach ($rows as $r) {
+                $lines[] = ($r['ok'] ? '  ✓ ' : '  ✗ ') . $r['url'] . ' — '
+                    . ($r['ok'] ? $r['links'] . ' articole (' . $r['ms'] . ' ms)' : $r['error']);
+            }
+        }
+        wp_send_json_success(array('message' => implode("\n", $lines)));
     }
 
     public function ajax_test() {
@@ -1227,7 +1407,7 @@ TXT;
         $model = (string) get_option('hzn_model', self::DEFAULT_MODEL);
         ?>
             <p style="max-width:720px;">
-                <?php esc_html_e('Preia știri de pe digi24.ro (Actualitate, Politică, Economie, Externe), le rescrie complet cu AI și le publică pe categoria aleasă, întinse pe parcursul zilei. Sursa apare în primul paragraf („conform digi24.ro”, link nofollow către știrea originală). Pozele digi24 NU se preiau: coverul vine din Wikimedia Commons / Openverse (doar CC0 / domeniu public, fără credit în articol) sau e o imagine AI generată de la zero.', 'horoscop-zilnic'); ?>
+                <?php esc_html_e('Preia știri de pe digi24.ro (Actualitate, Politică, Economie, Externe) sau, dacă digi24 nu răspunde, din sursele de rezervă de mai jos, le rescrie complet cu AI și le publică pe categoria aleasă, întinse pe parcursul zilei. Sursa apare în primul paragraf („conform digi24.ro”, link nofollow către știrea originală). Pozele sursei NU se preiau: coverul vine din Wikimedia Commons / Openverse (doar CC0 / domeniu public, fără credit în articol) sau e o imagine AI generată de la zero.', 'horoscop-zilnic'); ?>
             </p>
             <p style="max-width:720px;">
                 <?php if (!$on) { echo '<strong>' . esc_html__('Preluarea automată este oprită.', 'horoscop-zilnic') . '</strong> '; } ?>
@@ -1293,6 +1473,16 @@ TXT;
                                 </p>
                             <?php endforeach; ?>
                             <p class="description"><?php esc_html_e('Numărul de știri pe zi se poate seta separat pe fiecare secțiune (ex. Externe 15, Politică 3). Gol = valoarea implicită de mai sus.', 'horoscop-zilnic'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><?php esc_html_e('Surse', 'horoscop-zilnic'); ?></th>
+                        <td>
+                            <?php $def = self::default_feeds(); foreach (self::sections() as $key => $s) : ?>
+                                <p style="margin:0 0 4px;"><strong><?php echo esc_html($s['label']); ?></strong></p>
+                                <textarea name="hzn_feeds_<?php echo esc_attr($key); ?>" rows="3" class="large-text code" placeholder="<?php echo esc_attr(implode("\n", $def[$key])); ?>"><?php echo esc_textarea((string) get_option('hzn_feeds_' . $key, '')); ?></textarea>
+                            <?php endforeach; ?>
+                            <p class="description"><?php esc_html_e('O adresă pe rând, în ordinea încercării: dacă prima sursă nu răspunde sau nu are știri noi, se trece la următoarea. Adresele digi24.ro sunt pagini de secțiune; restul sunt feed-uri RSS ale secțiunii. Gol = lista implicită (gri). Sursa apare în primul paragraf („conform economica.net”, link nofollow). Butonul „Verifică sursele” de mai jos arată ce adrese merg de pe serverul acestui site.', 'horoscop-zilnic'); ?></p>
                         </td>
                     </tr>
                     <tr>
@@ -1368,7 +1558,35 @@ TXT;
                 <button type="button" class="button button-secondary" id="hzn-test" <?php disabled(!CW_API::has_key()); ?>><?php esc_html_e('Preia o știre de test (ciornă)', 'horoscop-zilnic'); ?></button>
                 <span id="hzn-test-result"></span>
             </p>
+            <p>
+                <button type="button" class="button button-secondary" id="hzn-check"><?php esc_html_e('Verifică sursele (de pe serverul site-ului)', 'horoscop-zilnic'); ?></button>
+            </p>
+            <?php $chk = get_option('hzn_sources_check'); ?>
+            <pre id="hzn-check-result" style="white-space:pre-wrap;max-width:900px;"><?php
+                if (is_array($chk) && !empty($chk['res'])) {
+                    echo esc_html(sprintf(__('Ultima verificare: %s', 'horoscop-zilnic'), $chk['at'])) . "\n";
+                    foreach ($chk['res'] as $key => $rows) {
+                        echo esc_html(self::sections()[$key]['label']) . ":\n";
+                        foreach ($rows as $r) { echo esc_html(($r['ok'] ? '  ✓ ' : '  ✗ ') . $r['url'] . ' — ' . ($r['ok'] ? $r['links'] . ' articole' : $r['error'])) . "\n"; }
+                    }
+                }
+            ?></pre>
             <script>
+            (function () {
+                var c = document.getElementById('hzn-check'), co = document.getElementById('hzn-check-result');
+                if (!c) { return; }
+                c.addEventListener('click', function () {
+                    c.disabled = true; co.textContent = <?php echo wp_json_encode(__('Se verifică sursele (până la 1-2 minute)...', 'horoscop-zilnic')); ?>;
+                    var fd = new FormData();
+                    fd.append('action', 'hzn_check_sources');
+                    fd.append('nonce', <?php echo wp_json_encode(wp_create_nonce('hzn_test')); ?>);
+                    fetch(ajaxurl, { method: 'POST', body: fd, credentials: 'same-origin' })
+                        .then(function (r) { return r.json(); })
+                        .then(function (j) { co.textContent = (j.data && j.data.message) || 'Eroare.'; })
+                        .catch(function () { co.textContent = 'Eroare de rețea.'; })
+                        .then(function () { c.disabled = false; });
+                });
+            })();
             (function () {
                 var b = document.getElementById('hzn-test'), out = document.getElementById('hzn-test-result');
                 if (!b) { return; }

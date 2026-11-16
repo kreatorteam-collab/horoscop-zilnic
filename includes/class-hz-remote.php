@@ -40,7 +40,7 @@ class HZ_Remote {
     }
 
     public function register() {
-        $routes = array('info', 'enqueue', 'status', 'control', 'settings', 'rewrite', 'golinks', 'trash', 'costs', 'reimage', 'upgrade', 'category', 'media', 'export', 'import', 'retitle');
+        $routes = array('info', 'enqueue', 'status', 'control', 'settings', 'rewrite', 'golinks', 'trash', 'costs', 'reimage', 'upgrade', 'category', 'media', 'export', 'import', 'retitle', 'newsources');
         foreach ($routes as $route) {
             register_rest_route('hz/v1', '/' . $route, array(
                 'methods'             => 'POST',
@@ -277,6 +277,7 @@ class HZ_Remote {
             'news_model'      => (string) get_option('hzn_model', ''),
             'news_last'       => (string) get_option('hzn_last_run', ''),
             'news_error'      => (string) get_option('hzn_last_error', ''),
+            'news_feeds'      => class_exists('HZ_News') ? array_combine(array_keys(HZ_News::sections()), array_map(array('HZ_News', 'feeds'), array_keys(HZ_News::sections()))) : array(),
             'ai_month_cost'   => class_exists('CW_Usage') ? round((float) CW_Usage::month_cost(), 4) : 0,
             'ai_month_limit'  => (float) get_option('cw_monthly_cost_limit', 0),
             'web_search'      => (int) get_option('cw_web_search', 0),
@@ -610,6 +611,15 @@ class HZ_Remote {
                     update_option('hzn_per_' . $key, max(0, min(50, (int) $set['news_per_' . $key])), 'no');
                     $changed[] = 'news_per_' . $key;
                 }
+            }
+        }
+        // v3.61.0: sursele știrilor pe secțiune (news_feeds_economie = adrese pe rânduri; „default” = lista implicită).
+        if (class_exists('HZ_News')) {
+            foreach (array_keys(HZ_News::sections()) as $key) {
+                if (!isset($set['news_feeds_' . $key])) { continue; }
+                $v = trim((string) $set['news_feeds_' . $key]);
+                update_option('hzn_feeds_' . $key, strtolower($v) === 'default' ? '' : HZ_News::sanitize_feeds($v), 'no');
+                $changed[] = 'news_feeds_' . $key;
             }
         }
         if (isset($set['news_model']) && trim((string) $set['news_model']) !== '') {
@@ -1114,5 +1124,23 @@ class HZ_Remote {
             if (!empty($hdr['Version'])) { $ver = (string) $hdr['Version']; }
         }
         return array('ok' => true, 'updated' => true, 'from' => HZ_VERSION, 'version' => $ver);
+    }
+
+    /**
+     * v3.61.0: verifică sursele știrilor DE PE SERVERUL SITE-ULUI (răspunde? câte articole?).
+     * Nu publică nimic și nu cheamă AI-ul.
+     */
+    public function handle_newsources(WP_REST_Request $req) {
+        $data = $this->auth($req);
+        if ($data instanceof WP_REST_Response) { return $data; }
+        if (!class_exists('HZ_News')) { return new WP_REST_Response(array('error' => 'no_module'), 400); }
+        if (function_exists('set_time_limit')) { @set_time_limit(180); }
+        $news = new HZ_News();
+        return new WP_REST_Response(array(
+            'ok'      => true,
+            'version' => HZ_VERSION,
+            'error'   => (string) get_option('hzn_last_error', ''),
+            'sources' => $news->check_sources(),
+        ), 200);
     }
 }
