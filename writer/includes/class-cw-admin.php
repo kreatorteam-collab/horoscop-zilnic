@@ -64,12 +64,27 @@ class CW_Admin {
         foreach ($labels as $provider => $label) {
             $err = get_option('cw_credit_error_' . $provider);
             if (!is_array($err) || empty($err['time'])) { continue; }
+            // v3.60.2: Claude e doar rezervă pe flotă (modelul principal e GPT), deci o generare
+            // reușită cu el — singurul lucru care stingea alerta — poate să nu mai vină zile
+            // întregi după alimentare. Verificăm noi contul: o cerere minimă, cel mult o dată pe oră.
+            if ($provider === 'anthropic' && $this->recheck_anthropic_credit($err)) { continue; }
             echo '<div class="notice notice-error"><p><strong>AI Writer:</strong> ' . esc_html(sprintf(
                 /* translators: %s: numele providerului */
                 __('Creditele API %s s-au terminat — generarea (articole + horoscop zilnic) eșuează. Alimentează contul; alerta dispare singură la prima generare reușită.', 'claude-writer'),
                 $label
             )) . '</p></div>';
         }
+    }
+
+    /**
+     * Mai sunt credite Anthropic? true = da (alerta a fost ștearsă). O cerere de un token,
+     * la cel mult o oră distanță și la minimum 10 minute după eroare.
+     */
+    private function recheck_anthropic_credit(array $err) {
+        if (time() - (int) $err['time'] < 10 * MINUTE_IN_SECONDS) { return false; }
+        if (get_transient('cw_credit_recheck_anthropic')) { return false; }
+        set_transient('cw_credit_recheck_anthropic', 1, HOUR_IN_SECONDS);
+        return class_exists('CW_API') && CW_API::anthropic_ping();
     }
 
     public function register_settings() {

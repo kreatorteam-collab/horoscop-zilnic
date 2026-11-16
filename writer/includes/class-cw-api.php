@@ -538,6 +538,20 @@ class CW_API {
         wp_mail($to, $subject, $body);
     }
 
+    /**
+     * v3.60.2: cerere minimă la Anthropic (câțiva tokeni), ca să aflăm dacă mai sunt credite fără
+     * să așteptăm o generare reală. true = contul răspunde (alerta se stinge).
+     */
+    public static function anthropic_ping() {
+        if (!self::has_provider_key('anthropic')) { return false; }
+        $model = CW_Models::provider_default('anthropic');
+        if ($model === '') { return false; }
+        $r = self::generate_anthropic($model, 'Răspunde cu: ok', 20); // 20, nu 1: un răspuns tăiat la max_tokens e continuat automat (până la 3 cereri)
+        if (is_wp_error($r)) { return false; }
+        self::clear_credit_alert('anthropic');
+        return true;
+    }
+
     /** La prima generare reușită, alerta se stinge singură. */
     public static function clear_credit_alert($provider) {
         if (get_option('cw_credit_error_' . $provider)) {
