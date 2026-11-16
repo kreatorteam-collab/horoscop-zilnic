@@ -229,6 +229,10 @@ class HZ_News {
                 set_transient('hzn_empty_' . $section, 1, 30 * MINUTE_IN_SECONDS);
                 return $result;
             }
+            if ($result->get_error_code() === 'hzn_source') {
+                // Sursa nu răspunde: reîncercăm peste 15 minute, dar eroarea rămâne vizibilă.
+                set_transient('hzn_empty_' . $section, 1, 15 * MINUTE_IN_SECONDS);
+            }
             return $this->fail($sections[$section]['label'] . ': ' . $result->get_error_message());
         }
         if (!$test) { $this->count_today($section); }
@@ -250,7 +254,14 @@ class HZ_News {
         // categorie existentă a site-ului se sar (cerința userului) — decizia vine dintr-un
         // apel scurt ÎNAINTE de rescriere, ca să nu plătim rescrieri aruncate.
         $auto = (int) get_option('hzn_cat_' . $section, 0) === 0 && self::site_categories();
-        foreach ($this->candidates($section) as $url) {
+        $cands = $this->candidates($section);
+        // v3.60.2: fără nicio adresă de articol din cauză că sursa nu răspunde = EROARE vizibilă,
+        // nu „nicio știre nouă” (înainte modulul tăcea și aștepta 30 de minute, la nesfârșit).
+        if (!$cands) {
+            $why = (string) get_transient('hzn_fetch_problem');
+            if ($why !== '') { return new WP_Error('hzn_source', 'sursa nu răspunde — ' . $why); }
+        }
+        foreach ($cands as $url) {
             if ($this->seen($url)) { continue; }
             if ($tries >= 4 || ++$fetched > 12) { break; }
 
@@ -329,6 +340,11 @@ class HZ_News {
         }
         $out = array_keys($out);
         set_transient($key, $out, $body !== '' ? 15 * MINUTE_IN_SECONDS : 5 * MINUTE_IN_SECONDS);
+        if ($body === '' && $this->fetch_problem !== '') {
+            set_transient('hzn_fetch_problem', $this->fetch_problem, 30 * MINUTE_IN_SECONDS);
+        } elseif ($body !== '') {
+            delete_transient('hzn_fetch_problem');
+        }
         return $out;
     }
 
@@ -346,6 +362,9 @@ class HZ_News {
         return 'https://www.digi24.ro' . $path;
     }
 
+    /** De ce n-a mers ultima citire de pe digi24 ('' = a mers). v3.60.2 */
+    private $fetch_problem = '';
+
     private function http_get($url, $timeout = 25) {
         $r = wp_remote_get($url, array(
             'timeout'     => $timeout,
@@ -353,7 +372,16 @@ class HZ_News {
             'user-agent'  => self::UA,
             'headers'     => array('Accept-Language' => 'ro-RO,ro;q=0.9'),
         ));
-        if (is_wp_error($r) || (int) wp_remote_retrieve_response_code($r) !== 200) { return ''; }
+        if (is_wp_error($r)) {
+            $this->fetch_problem = wp_parse_url($url, PHP_URL_HOST) . ': ' . $r->get_error_message();
+            return '';
+        }
+        $code = (int) wp_remote_retrieve_response_code($r);
+        if ($code !== 200) {
+            $this->fetch_problem = wp_parse_url($url, PHP_URL_HOST) . ' a răspuns HTTP ' . $code
+                . ($code === 403 || $code === 429 ? ' (serverul site-ului pare blocat de sursă)' : '');
+            return '';
+        }
         return (string) wp_remote_retrieve_body($r);
     }
 
