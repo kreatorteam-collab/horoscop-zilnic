@@ -347,6 +347,8 @@ class HZ_Remote {
                     ? (string) $it['img_file'] : '',
                 // v3.59.0: rescrie articolul existent cu acest ID (titlu nou, aceeași adresă).
                 'rewrite_id' => isset($it['rewrite_id']) ? (int) $it['rewrite_id'] : 0,
+                // v3.61.3: planul DOAR al acestui articol (ex. un ghid: secțiunile și articolele de legat).
+                'brief'      => isset($it['brief']) ? mb_substr(sanitize_textarea_field((string) $it['brief']), 0, 12000) : '',
             );
         }
 
