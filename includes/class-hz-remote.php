@@ -622,6 +622,7 @@ class HZ_Remote {
             foreach (array_keys(HZ_News::sections()) as $key) {
                 if (!isset($set['news_feeds_' . $key])) { continue; }
                 $v = trim((string) $set['news_feeds_' . $key]);
+                // v3.61.4: fără listă implicită — „default” / gol = secțiunea nu preia nimic.
                 update_option('hzn_feeds_' . $key, strtolower($v) === 'default' ? '' : HZ_News::sanitize_feeds($v), 'no');
                 $changed[] = 'news_feeds_' . $key;
             }
