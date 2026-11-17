@@ -341,6 +341,10 @@ class HZ_Bulk {
             // v3.59.0: rescrierea unui articol EXISTENT (duplicate în flotă, vezi HZ_Retitle):
             // același ID / adresă / poză, titlu și text noi. Fără poze noi.
             $rw = isset($row['rewrite_id']) ? (int) $row['rewrite_id'] : 0;
+            // v3.61.3: planul propriu al articolului (ghidurile din aplicație: secțiuni + articole de legat).
+            if (!empty($row['brief'])) {
+                $q[count($q) - 1]['xb'] = mb_substr((string) $row['brief'], 0, 12000);
+            }
             if ($rw > 0 && class_exists('HZ_Retitle')) {
                 $last = count($q) - 1;
                 $q[$last]['rw']   = $rw;
@@ -1043,6 +1047,11 @@ class HZ_Bulk {
                         . wp_strip_all_tags($old->post_title) . "”). Scrie-l de la zero, original, pe titlul nou de mai sus; "
                         . "NU folosi titlul vechi și nu reproduce formulări din alte articole.";
                 }
+            }
+            // v3.61.3: planul acestui articol (ex. ghid): înaintea instrucțiunilor de lot, fiindcă le
+            // e mai specific (structura, articolele de legat).
+            if (!empty($item['xb']) && trim((string) $item['xb']) !== '') {
+                $brief .= "\n\nPlanul acestui articol (respectă-l):\n" . trim((string) $item['xb']);
             }
             if (trim((string) $item['extra']) !== '') {
                 $brief .= "\n\nInstrucțiuni suplimentare pentru acest lot de articole:\n" . trim((string) $item['extra']);
