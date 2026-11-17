@@ -85,12 +85,13 @@ class HZ_News {
         );
     }
 
-    /** Sursele secțiunii: setarea (o adresă pe rând) sau lista implicită. */
+    /**
+     * Sursele secțiunii = DOAR adresele puse în setări, o adresă pe rând (v3.61.4, userul: „scoate
+     * lista, pun eu linkurile de feed și doar de acolo să tragă”). Fără listă implicită și fără surse
+     * de rezervă: o secțiune fără adrese nu preia nimic. default_feeds() rămâne doar ca exemplu.
+     */
     public static function feeds($section) {
-        $list = self::feed_list((string) get_option('hzn_feeds_' . $section, ''));
-        if ($list) { return $list; }
-        $def = self::default_feeds();
-        return isset($def[$section]) ? $def[$section] : array();
+        return self::feed_list((string) get_option('hzn_feeds_' . $section, ''));
     }
 
     /** Adresele valide dintr-un text (o adresă pe rând, cu http:// sau https://). */
@@ -255,6 +256,7 @@ class HZ_News {
         $gap  = 0;
         foreach (array_keys(self::sections()) as $key) {
             if (!(int) get_option('hzn_on_' . $key, 1)) { continue; }
+            if (!self::feeds($key)) { continue; }                 // v3.61.4: fără surse setate, nimic de preluat
             if (get_transient('hzn_empty_' . $key)) { continue; } // n-a avut știri noi de curând
             // v3.53.3: ținta de acum e pe secțiune (Externe poate avea 15/zi, Politică 3/zi).
             $per    = self::per_day($key);
@@ -298,6 +300,10 @@ class HZ_News {
         }
 
         if (is_wp_error($result)) {
+            if ($result->get_error_code() === 'hzn_nofeeds') {
+                // Secțiune fără surse: nu e eroare de rulare, doar de setare (cron-ul o sare oricum).
+                return new WP_Error('hzn_nofeeds', $sections[$section]['label'] . ': ' . $result->get_error_message());
+            }
             if ($result->get_error_code() === 'hzn_none') {
                 // Nimic nou pe secțiune: o lăsăm în pace 30 de minute, fără să fie „eroare".
                 set_transient('hzn_empty_' . $section, 1, 30 * MINUTE_IN_SECONDS);
@@ -321,6 +327,9 @@ class HZ_News {
     }
 
     private function process($section, $test) {
+        if (!self::feeds($section)) {
+            return new WP_Error('hzn_nofeeds', 'nicio sursă setată pentru secțiune — pune adresele de feed în Setări → Știri → Surse.');
+        }
         // Câteva încercări: un articol video / live / prea scurt se sare și trecem la următorul.
         $tries = 0;
         $fetched = 0;
@@ -458,13 +467,8 @@ class HZ_News {
         $sec  = self::sections()[$section];
         $urls = array();
         $srcs = array();
-        foreach (self::feeds($section) as $f) {
-            $srcs[] = $f;
-            if (self::is_digi($f)) {
-                $rss = (string) get_option('hzn_rss_url', 'https://www.digi24.ro/rss');
-                if ($rss !== '' && self::is_digi($rss)) { $srcs[] = $rss; }
-            }
-        }
+        // v3.61.4: doar adresele din setări (fără feed-ul general digi24 adăugat automat).
+        foreach (self::feeds($section) as $f) { $srcs[] = $f; }
         $problems = array();
         foreach (array_unique($srcs) as $src) {
             $this->fetch_problem = '';
@@ -1492,6 +1496,7 @@ TXT;
         $lines = array();
         foreach ($this->check_sources() as $key => $rows) {
             $lines[] = self::sections()[$key]['label'] . ':';
+            if (!$rows) { $lines[] = '  — nicio sursă setată (secțiunea nu preia nimic)'; }
             foreach ($rows as $r) {
                 $lines[] = ($r['ok'] ? '  ✓ ' : '  ✗ ') . $r['url'] . ' — '
                     . ($r['ok'] ? $r['links'] . ' articole (' . $r['ms'] . ' ms)' : $r['error']);
@@ -1523,7 +1528,7 @@ TXT;
         $model = (string) get_option('hzn_model', self::DEFAULT_MODEL);
         ?>
             <p style="max-width:720px;">
-                <?php esc_html_e('Preia știri de pe digi24.ro (Actualitate, Politică, Economie, Externe) sau, dacă digi24 nu răspunde, din sursele de rezervă de mai jos, le rescrie complet cu AI și le publică pe categoria aleasă, întinse pe parcursul zilei. Sursa apare în primul paragraf („conform digi24.ro”, link nofollow către știrea originală). Pozele sursei NU se preiau: coverul vine din Wikimedia Commons / Openverse (doar CC0 / domeniu public, fără credit în articol) sau e o imagine AI generată de la zero.', 'horoscop-zilnic'); ?>
+                <?php esc_html_e('Preia știri DOAR din sursele pe care le pui mai jos, la fiecare secțiune (Actualitate, Politică, Economie, Externe), le rescrie complet cu AI și le publică pe categoria aleasă, întinse pe parcursul zilei. Sursa apare în primul paragraf („conform site.ro”, link nofollow către știrea originală). Pozele sursei NU se preiau: coverul vine din Wikimedia Commons / Openverse (doar CC0 / domeniu public, fără credit în articol) sau e o imagine AI generată de la zero.', 'horoscop-zilnic'); ?>
             </p>
             <p style="max-width:720px;">
                 <?php if (!$on) { echo '<strong>' . esc_html__('Preluarea automată este oprită.', 'horoscop-zilnic') . '</strong> '; } ?>
@@ -1597,11 +1602,11 @@ TXT;
                     <tr>
                         <th scope="row"><?php esc_html_e('Surse', 'horoscop-zilnic'); ?></th>
                         <td>
-                            <?php $def = self::default_feeds(); foreach (self::sections() as $key => $s) : ?>
+                            <?php foreach (self::sections() as $key => $s) : ?>
                                 <p style="margin:0 0 4px;"><strong><?php echo esc_html($s['label']); ?></strong></p>
-                                <textarea name="hzn_feeds_<?php echo esc_attr($key); ?>" rows="3" class="large-text code" placeholder="<?php echo esc_attr(implode("\n", $def[$key])); ?>"><?php echo esc_textarea((string) get_option('hzn_feeds_' . $key, '')); ?></textarea>
+                                <textarea name="hzn_feeds_<?php echo esc_attr($key); ?>" rows="3" class="large-text code" placeholder="https://site.ro/categorie/feed"><?php echo esc_textarea((string) get_option('hzn_feeds_' . $key, '')); ?></textarea>
                             <?php endforeach; ?>
-                            <p class="description"><?php esc_html_e('O adresă pe rând, în ordinea încercării: dacă prima sursă nu răspunde sau nu are știri noi, se trece la următoarea. Adresele digi24.ro sunt pagini de secțiune; restul sunt feed-uri RSS ale secțiunii. Gol = lista implicită (gri). Sursa apare în primul paragraf („conform economica.net”, link nofollow). Butonul „Verifică sursele” de mai jos arată ce adrese merg de pe serverul acestui site.', 'horoscop-zilnic'); ?></p>
+                            <p class="description"><?php esc_html_e('Știrile se preiau DOAR de aici: o adresă de feed RSS pe rând (sau o pagină de secțiune digi24.ro), în ordinea încercării. Secțiunea fără adrese nu preia nimic. Sursa apare în primul paragraf („conform site.ro”, link nofollow). Butonul „Verifică sursele” de mai jos arată ce adrese merg de pe serverul acestui site.', 'horoscop-zilnic'); ?></p>
                         </td>
                     </tr>
                     <tr>
@@ -1658,13 +1663,7 @@ TXT;
                         <th scope="row"><label for="hzn_max_age"><?php esc_html_e('Vechime maximă', 'horoscop-zilnic'); ?></label></th>
                         <td><input type="number" min="1" max="168" name="hzn_max_age" id="hzn_max_age" value="<?php echo esc_attr((int) get_option('hzn_max_age', 24)); ?>" class="small-text" /> <?php esc_html_e('ore', 'horoscop-zilnic'); ?></td>
                     </tr>
-                    <tr>
-                        <th scope="row"><label for="hzn_rss_url"><?php esc_html_e('Feed RSS suplimentar', 'horoscop-zilnic'); ?></label></th>
-                        <td>
-                            <input type="url" name="hzn_rss_url" id="hzn_rss_url" class="large-text" value="<?php echo esc_attr(get_option('hzn_rss_url', 'https://www.digi24.ro/rss')); ?>" />
-                            <p class="description"><?php esc_html_e('Pe lângă paginile secțiunilor. Articolele se împart pe secțiuni după adresă.', 'horoscop-zilnic'); ?></p>
-                        </td>
-                    </tr>
+                    <?php /* v3.61.4: „Feed RSS suplimentar” (digi24, adăugat automat) scos — știrile vin doar din „Surse”. */ ?>
                 </table>
                 <?php submit_button(__('Salvează setările', 'horoscop-zilnic')); ?>
             </form>
