@@ -1177,7 +1177,9 @@ class HZ_Bulk {
             }
         }
         if ($img === null) {
-            $img = $this->fetch_images($title, $model, $images, (string) ($item['imgsrc'] ?? ''), (string) ($item['imgstyle'] ?? ''));
+            // v3.62.0: aici doar COVERUL (căutat după titlu); pozele din text se
+            // caută mai jos, fiecare după subtitlul secțiunii în care stă.
+            $img = $this->fetch_images($title, $model, min(1, $images), (string) ($item['imgsrc'] ?? ''), (string) ($item['imgstyle'] ?? ''));
         }
         $att_ids  = $img['ids'];
         $img_note = $img['note'];
@@ -1205,7 +1207,28 @@ class HZ_Bulk {
         unset($item['gen']); // publicăm acum, textul salvat nu mai e necesar
 
         // Imaginile suplimentare (după cover) intră în corp, distribuite după H2-uri.
-        if (count($att_ids) > 1) {
+        // v3.62.0: fiecare e căutată după subtitlul secțiunii (alt subiect decât
+        // coverul, altă poză — HZ_Magnific ține evidența celor folosite) și primește
+        // subtitlul ca text alternativ. O poză care nu se găsește doar lipsește:
+        // articolul nu mai așteaptă după ea.
+        if ($images > 1 && !empty($att_ids)) {
+            $heads = $this->section_heads($content, $images - 1);
+            $extra = array();
+            $alts  = array();
+            foreach ($heads as $h) {
+                $one = $this->fetch_images($h . ' (' . $title . ')', $model, 1, (string) ($item['imgsrc'] ?? ''), (string) ($item['imgstyle'] ?? ''));
+                $cost += $one['cost'];
+                if (!empty($one['ids'])) {
+                    $extra[] = (int) $one['ids'][0];
+                    $alts[]  = $h;
+                }
+                if (!empty($one['blocked'])) { break; }
+            }
+            if (!empty($extra)) {
+                $content = $this->insert_images($content, $extra, $alts);
+                $att_ids = array_merge($att_ids, $extra);
+            }
+        } elseif (count($att_ids) > 1) {
             $content = $this->insert_images($content, array_slice($att_ids, 1));
         }
 
@@ -1384,11 +1407,11 @@ class HZ_Bulk {
 
     /** Câte imagini vrea acest articol: override din lot, altfel setarea site-ului. */
     /**
-     * v3.13.0: UN SINGUR cadru per articol — coverul. Nu mai completăm și altă
-     * imagine în corpul articolului, nici din setarea site-ului, nici din
-     * override-ul lotului trimis de panou. (Ca să revii: scoate MAX_IMAGES.)
+     * v3.13.0 – v3.61: UN SINGUR cadru per articol — coverul.
+     * v3.62.0: până la 3 — coverul + până la 2 poze în text, fiecare căutată după
+     * subtitlul secțiunii ei, cu subtitlul ca alt (cererea userului, 24.11.2026).
      */
-    const MAX_IMAGES = 1;
+    const MAX_IMAGES = 3;
 
     /** v3.55.0: itemul are o poză încărcată din panou, încă pe disc. */
     private function has_upload($item) {
@@ -1703,7 +1726,51 @@ class HZ_Bulk {
     }
 
     /** Inserează imaginile în corp: după al 2-lea, apoi al 4-lea subtitlu H2. */
-    private function insert_images($content, $att_ids) {
+    /**
+     * v3.62.0: subtitlurile (text simplu) după care se caută pozele din corp —
+     * al 2-lea, al 4-lea… dintre secțiunile cu subiect (fără întrebări frecvente /
+     * concluzii); cu prea puține, completăm cu celelalte. Poza intră sub subtitlul ei.
+     */
+    private function section_heads($content, $n) {
+        if ($n < 1) { return array(); }
+        preg_match_all('/<h2[^>]*>(.*?)<\/h2>/is', (string) $content, $m);
+        $all = array();
+        foreach ($m[1] as $h) {
+            $t = trim(preg_replace('/\s+/u', ' ', wp_strip_all_tags(html_entity_decode($h, ENT_QUOTES, 'UTF-8'))));
+            // Secțiunile fără subiect vizual (întrebări frecvente, concluzii) nu dau poze bune.
+            if ($t !== '' && !preg_match('/^(întreb|intreb|concluzi|pe scurt|în concluzie|in concluzie|rezumat|surse)/iu', $t)) { $all[] = $t; }
+        }
+        $out = array();
+        for ($i = 1; $i < count($all) && count($out) < $n; $i += 2) { $out[] = $all[$i]; }
+        for ($i = 0; $i < count($all) && count($out) < $n; $i++) {
+            if (!in_array($all[$i], $out, true)) { $out[] = $all[$i]; }
+        }
+        return array_slice($out, 0, $n);
+    }
+
+    private function insert_images($content, $att_ids, $alts = array()) {
+        // v3.62.0: cu subtitluri date (pozele alese după secțiune), fiecare poză
+        // intră exact sub subtitlul după care a fost căutată.
+        if (!empty($alts)) {
+            $rest_ids = array();
+            foreach ($att_ids as $k => $att) {
+                $h = isset($alts[$k]) ? (string) $alts[$k] : '';
+                $done = false;
+                if ($h !== '') {
+                    $content = preg_replace_callback('/<h2[^>]*>(.*?)<\/h2>/is', function ($m) use ($h, $att, &$done) {
+                        if ($done) { return $m[0]; }
+                        $t = trim(preg_replace('/\s+/u', ' ', wp_strip_all_tags(html_entity_decode($m[1], ENT_QUOTES, 'UTF-8'))));
+                        if ($t !== $h) { return $m[0]; }
+                        $done = true;
+                        return $m[0] . "\n" . $this->figure_html($att, $h) . "\n";
+                    }, $content);
+                }
+                if (!$done) { $rest_ids[] = $att; }
+            }
+            if (empty($rest_ids)) { return $content; }
+            $att_ids = $rest_ids;
+            $alts    = array();
+        }
         $parts = preg_split('/(<\/h2>)/i', $content, -1, PREG_SPLIT_DELIM_CAPTURE);
         if (count($parts) < 3) {
             // Sub 1 H2 complet: punem imaginile la mijlocul textului, între paragrafe.
@@ -1735,9 +1802,12 @@ class HZ_Bulk {
         return $out;
     }
 
-    private function figure_html($att_id) {
-        // alt GOL, intentionat: pozele de stock sunt decorative, nu descriu articolul.
-        $img = wp_get_attachment_image($att_id, 'large', false, array('alt' => '', 'loading' => 'lazy'));
+    private function figure_html($att_id, $alt = '') {
+        // v3.62.0: alt = subtitlul secțiunii (poza e aleasă după el). Fără subtitlu
+        // (pozele completate ulterior), alt rămâne gol: poza e decorativă.
+        $alt = trim((string) $alt);
+        if ($alt !== '') { update_post_meta((int) $att_id, '_wp_attachment_image_alt', sanitize_text_field($alt)); }
+        $img = wp_get_attachment_image($att_id, 'large', false, array('alt' => $alt, 'loading' => 'lazy'));
         return '<figure class="wp-block-image size-large">' . $img . '</figure>';
     }
 
